@@ -2,34 +2,58 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendOTP = require("../utils/sendOTP");
+const path = require("path");
 
-// Đăng ký tài khoản & gửi OTP
 const register = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { fullName, email, password } = req.body;
+
+    const missingFields = [];
+    if (!fullName) missingFields.push("fullName");
+    if (!email) missingFields.push("email");
+    if (!password) missingFields.push("password");
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: `Vui lòng nhập đầy đủ các trường: ${missingFields.join(", ")}!`,
+      });
+    }
+
     let user = await User.findOne({ email });
 
     if (user) return res.status(400).json({ message: "Email đã tồn tại" });
 
-    // Hash password trước khi lưu
     const hashedPassword = await bcrypt.hash(password, 10);
-    const otp = Math.floor(100000 + Math.random() * 900000); // Tạo mã OTP 6 số
-    const otpExpires = new Date(Date.now() + 5 * 60 * 1000); // Hết hạn sau 5 phút
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const avatarUrl = `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(email)}`; // Đảm bảo tạo avatar tự động
+    const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Lưu User với OTP
-    user = new User({ email, password: hashedPassword, otp, otpExpires });
+    user = new User({
+      fullName,
+      email,
+      password: hashedPassword,
+      otp,
+      otpExpires,
+      avatar: avatarUrl,
+    });
     await user.save();
 
-    // Gửi OTP qua email
-    await sendOTP(email, otp);
+    try {
+      await sendOTP(email, otp);
+    } catch (emailError) {
+      await User.deleteOne({ email });
+      console.error("Failed to send OTP:", emailError.message);
+      return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau", error: emailError.message });
+    }
 
     res.status(201).json({ message: "Đăng ký thành công! Vui lòng kiểm tra email để xác nhận OTP." });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("Error in register:", error.message);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-// Xác thực OTP
+// Các hàm khác (giữ nguyên)
 const verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -39,7 +63,6 @@ const verifyOTP = async (req, res) => {
       return res.status(400).json({ message: "OTP không hợp lệ hoặc đã hết hạn" });
     }
 
-    // Cập nhật tài khoản đã xác thực
     user.isVerified = true;
     user.otp = undefined;
     user.otpExpires = undefined;
@@ -47,11 +70,11 @@ const verifyOTP = async (req, res) => {
 
     res.status(200).json({ message: "Xác thực OTP thành công! Bạn có thể đăng nhập ngay bây giờ." });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("Error in verifyOTP:", error.message);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-// Đăng nhập (chỉ cho phép tài khoản đã xác thực)
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -64,15 +87,23 @@ const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Sai email hoặc mật khẩu" });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
-    res.status(200).json({ token, user });
+    res.status(200).json({
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        avatar: user.avatar,
+      },
+    });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("Error in login:", error.message);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-// Gửi OTP khi quên mật khẩu
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -81,23 +112,25 @@ const forgotPassword = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: "Email không tồn tại" });
 
-    // Tạo OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = otp;
-    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 phút hết hạn
+    user.otpExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    // Gửi email OTP
-     await sendOTP(email, otp);
+    try {
+      await sendOTP(email, otp);
+    } catch (emailError) {
+      console.error("Failed to send OTP for forgot password:", emailError.message);
+      return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau", error: emailError.message });
+    }
 
     res.status(200).json({ message: "OTP đã gửi qua email" });
   } catch (error) {
-    console.error("Lỗi server:", error);
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("Error in forgotPassword:", error.message);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-//  Xác minh OTP và cập nhật mật khẩu mới
 const resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -108,7 +141,6 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "OTP không hợp lệ hoặc đã hết hạn" });
     }
 
-    // Cập nhật mật khẩu mới
     user.password = await bcrypt.hash(newPassword, 10);
     user.otp = null;
     user.otpExpires = null;
@@ -116,8 +148,46 @@ const resetPassword = async (req, res) => {
 
     res.status(200).json({ message: "Mật khẩu đã được cập nhật thành công" });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("Error in resetPassword:", error.message);
+    res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-module.exports = { register, verifyOTP, login, forgotPassword, resetPassword };
+const updateAvatar = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: "Vui lòng upload file avatar" });
+    }
+
+    const avatarUrl = `/uploads/${file.filename}`;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    user.avatar = avatarUrl;
+    await user.save();
+
+    res.status(200).json({
+      message: "Cập nhật avatar thành công",
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        avatar: user.avatar,
+      },
+    });
+  } catch (error) {
+    console.error("Error in updateAvatar:", error.message);
+    if (error.code === "ENOENT") {
+      return res.status(500).json({ message: "Thư mục uploads không tồn tại hoặc không có quyền ghi" });
+    }
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+module.exports = { register, verifyOTP, login, forgotPassword, resetPassword, updateAvatar };
