@@ -8,6 +8,8 @@ const {
   addNote,
   addChecklist,
   addChecklistItem,
+  moveCard,
+  addMember,
 } = require("../controllers/cardController");
 const authMiddleware = require("../middlewares/authMiddleware");
 
@@ -300,5 +302,90 @@ router.post("/:cardId/checklists", authMiddleware, addChecklist);
  *         description: Không có token hoặc token không hợp lệ  
  */
 router.post("/:cardId/checklists/:checklistIndex/items", authMiddleware, addChecklistItem);
+/**
+ * @swagger
+ * /api/cards/{cardId}/move:
+ *   put:
+ *     summary: Di chuyển thẻ sang cột hoặc bảng khác
+ *     tags: [Cards]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: cardId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của thẻ (phải là ObjectId hợp lệ)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newListId
+ *               - newBoardId
+ *             properties:
+ *               newListId:
+ *                 type: string
+ *                 description: ID của cột mới
+ *               newBoardId:
+ *                 type: string
+ *                 description: ID của bảng mới
+ *     responses:
+ *       200:
+ *         description: Di chuyển thành công
+ *       400:
+ *         description: Dữ liệu không hợp lệ
+ *       403:
+ *         description: Không có quyền
+ *       404:
+ *         description: Không tìm thấy thẻ, cột hoặc bảng
+ *       500:
+ *         description: Lỗi server
+ */
+router.put("/:cardId/move", authMiddleware, moveCard);
+
+/**
+ * @swagger
+ * /api/cards/{cardId}/members:
+ *   post:
+ *     summary: Thêm member vào thẻ
+ *     tags: [Cards]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: cardId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của thẻ (phải là ObjectId hợp lệ)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - memberId
+ *             properties:
+ *               memberId:
+ *                 type: string
+ *                 description: ID của member (phải là ObjectId hợp lệ)
+ *     responses:
+ *       200:
+ *         description: Thêm member thành công
+ *       400:
+ *         description: Dữ liệu không hợp lệ
+ *       403:
+ *         description: Không có quyền
+ *       404:
+ *         description: Không tìm thấy thẻ hoặc board
+ *       500:
+ *         description: Lỗi server
+ */
+router.post("/:cardId/members", authMiddleware, addMember);
 
 module.exports = router;

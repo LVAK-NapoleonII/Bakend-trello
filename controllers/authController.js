@@ -2,7 +2,11 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendOTP = require("../utils/sendOTP");
-const path = require("path");
+
+
+const generateRefreshToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
+};
 
 const register = async (req, res) => {
   try {
@@ -25,7 +29,7 @@ const register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const avatarUrl = `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(email)}`; // Đảm bảo tạo avatar tự động
+    const avatarUrl = `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(email)}`;
     const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
     user = new User({
@@ -53,7 +57,6 @@ const register = async (req, res) => {
   }
 };
 
-// Các hàm khác (giữ nguyên)
 const verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -75,7 +78,7 @@ const verifyOTP = async (req, res) => {
   }
 };
 
-const login = async (req, res) => {
+const login = async (req, res, io) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
@@ -87,7 +90,18 @@ const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Sai email hoặc mật khẩu" });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    const refreshToken = generateRefreshToken(user._id);
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 90 * 24 * 60 * 60 * 1000,
+    });
+
+    // Phát sự kiện user-login qua Socket.IO
+    io.emit("user-login", user._id);
 
     res.status(200).json({
       token,
@@ -101,6 +115,31 @@ const login = async (req, res) => {
   } catch (error) {
     console.error("Error in login:", error.message);
     res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+const refreshToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken; 
+    if (!refreshToken) {
+      return res.status(401).json({ message: "Không có refresh token" });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return res.status(401).json({ message: "Người dùng không tồn tại" });
+    }
+
+    const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+    res.status(200).json({
+      token: newToken,
+    });
+  } catch (error) {
+    console.error("Error in refreshToken:", error.message);
+    res.status(401).json({ message: "Refresh token không hợp lệ", error: error.message });
   }
 };
 
@@ -189,5 +228,9 @@ const updateAvatar = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+const logout = async (req, res) => {
+  res.clearCookie("refreshToken");
+  res.status(200).json({ message: "Đăng xuất thành công" });
+};
 
-module.exports = { register, verifyOTP, login, forgotPassword, resetPassword, updateAvatar };
+module.exports = { register, verifyOTP, login, forgotPassword, resetPassword, updateAvatar, refreshToken, logout };

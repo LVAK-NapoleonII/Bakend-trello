@@ -1,7 +1,7 @@
 const express = require("express");
 const {
   createWorkspace,
-  getWorkspaces, //  Đã sửa tên
+  getWorkspaces, 
   getWorkspaceById,
   updateWorkspace,
   deleteWorkspace,
