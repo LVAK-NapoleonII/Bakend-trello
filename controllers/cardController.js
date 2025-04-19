@@ -735,6 +735,7 @@ const toggleChecklistItem = async (req, res, io) => {
     }
 
     // Tìm card
+    console.log("Finding card:", cardId);
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
@@ -742,6 +743,7 @@ const toggleChecklistItem = async (req, res, io) => {
     }
 
     // Tìm board
+    console.log("Finding board:", card.board);
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
@@ -749,6 +751,7 @@ const toggleChecklistItem = async (req, res, io) => {
     }
 
     // Kiểm tra quyền thành viên
+    console.log("Checking member permission for user:", req.user._id.toString());
     const isMember = board.members.some(
       (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
     );
@@ -758,25 +761,30 @@ const toggleChecklistItem = async (req, res, io) => {
     }
 
     // Kiểm tra checklists
+    console.log("Checking checklists array:", card.checklists?.length);
     if (!card.checklists || !Array.isArray(card.checklists)) {
       console.log("Checklists not initialized for card:", cardId);
       return res.status(404).json({ message: "Checklist không tồn tại!" });
     }
 
     // Kiểm tra checklist và item
+    console.log("Checking checklist and item:", { checklistIdx, itemIdx });
     if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
       console.log("Checklist or item not found:", { checklistIdx, itemIdx });
       return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
     }
 
     // Toggle trạng thái completed
+    console.log("Toggling item completed status");
     const item = card.checklists[checklistIdx].items[itemIdx];
     item.completed = !item.completed;
 
     // Lưu card
+    console.log("Saving card");
     await card.save();
 
     // Tạo activity
+    console.log("Creating activity");
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const action = item.completed ? "checklist_item_completed" : "checklist_item_uncompleted";
     const activity = new Activity({
@@ -789,6 +797,7 @@ const toggleChecklistItem = async (req, res, io) => {
     await activity.save();
 
     // Cập nhật activities cho card và board
+    console.log("Updating activities");
     card.activities = card.activities || [];
     card.activities.push(activity._id);
     board.activities = board.activities || [];
@@ -796,8 +805,10 @@ const toggleChecklistItem = async (req, res, io) => {
     await Promise.all([card.save(), board.save()]);
 
     // Gửi thông báo cho các thành viên khác
+    console.log("Sending notifications to members:", card.members?.length);
     for (const memberId of card.members) {
       if (memberId.toString() !== req.user._id.toString()) {
+        console.log("Creating notification for member:", memberId.toString());
         const notification = new Notification({
           user: memberId,
           message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.text}" trong card "${card.title}"`,
@@ -811,6 +822,7 @@ const toggleChecklistItem = async (req, res, io) => {
     }
 
     // Phát sự kiện Socket.IO
+    console.log("Emitting checklist-item-toggled event");
     io.to(card.board.toString()).emit("checklist-item-toggled", {
       cardId,
       checklistIndex: checklistIdx,
@@ -829,10 +841,18 @@ const toggleChecklistItem = async (req, res, io) => {
     // Trả về toàn bộ checklists
     res.status(200).json(card.checklists);
   } catch (err) {
-    console.error("Error in toggleChecklistItem:", err.message, err.stack);
+    console.error("Error in toggleChecklistItem:", {
+      message: err.message,
+      stack: err.stack,
+      cardId,
+      checklistIndex,
+      itemIndex,
+      userId: req.user?._id?.toString(),
+    });
     res.status(500).json({ message: "Lỗi khi cập nhật trạng thái checklist item", error: err.message });
   }
 };
+
 // Di chuyển thẻ giữa các list
 const moveCard = async (req, res, io) => {
   let cardId;
@@ -1209,6 +1229,144 @@ const toggleCardCompletion = async (req, res, io) => {
     return res.status(500).json({ message: "Lỗi khi cập nhật trạng thái", error: err.message });
   }
 };
+const removeMemberFromCard = async (req, res, io) => {
+  const { cardId, memberId } = req.params;
+
+  try {
+    // Kiểm tra user
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+    console.log("User authenticated:", req.user._id.toString());
+
+    // Kiểm tra cardId và memberId
+    if (!mongoose.Types.ObjectId.isValid(cardId)) {
+      console.log("Invalid cardId:", cardId);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      console.log("Invalid memberId:", memberId);
+      return res.status(400).json({ message: "Member ID không hợp lệ!" });
+    }
+    console.log("Validated IDs:", { cardId, memberId });
+
+    // Tìm card
+    console.log("Finding card:", cardId);
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      console.log("Card not found or deleted:", cardId);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+    console.log("Card found:", { cardId, title: card.title });
+
+    // Tìm board
+    console.log("Finding board:", card.board);
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board?.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+    console.log("Board found:", { boardId: board._id.toString(), title: board.title });
+
+    // Kiểm tra xem user có phải là owner của board không
+    const isOwner = board.owner && board.owner.toString() === req.user._id.toString();
+    if (!isOwner) {
+      console.log("Permission denied: User is not board owner:", req.user._id.toString());
+      return res.status(403).json({ message: "Chỉ chủ phòng mới có quyền xóa thành viên khỏi card!" });
+    }
+    console.log("User is board owner:", req.user._id.toString());
+
+    // Kiểm tra và validate card.members
+    console.log("Current card.members:", card.members.map(m => m?.toString()));
+    if (!Array.isArray(card.members)) {
+      console.error("card.members is not an array:", card.members);
+      return res.status(500).json({ message: "Dữ liệu card.members không hợp lệ!" });
+    }
+
+    // Kiểm tra xem memberId có trong card.members không
+    const memberExists = card.members.some((m) => m && m.toString() === memberId);
+    if (!memberExists) {
+      console.log("Member not found in card:", memberId);
+      return res.status(404).json({ message: "Thành viên không tồn tại trong card!" });
+    }
+
+    // Xóa member khỏi card, bỏ qua các giá trị không hợp lệ
+    console.log("Removing member from card:", memberId);
+    card.members = card.members.filter((m) => {
+      if (!m || !mongoose.Types.ObjectId.isValid(m)) {
+        console.warn("Invalid member in card.members:", m);
+        return false;
+      }
+      return m.toString() !== memberId;
+    });
+    console.log("Updated card.members:", card.members.map(m => m.toString()));
+
+    // Lưu card
+    console.log("Saving card");
+    await card.save();
+
+    // Tạo activity
+    console.log("Creating activity");
+    const userName = req.user.fullName || req.user.email || "Unknown User";
+    const activity = new Activity({
+      user: req.user._id,
+      action: "member_removed_from_card",
+      target: card._id,
+      targetModel: "Card",
+      details: `User ${userName} removed a member from card "${card.title}"`,
+    });
+    await activity.save();
+    console.log("Activity created:", activity._id.toString());
+
+    // Cập nhật activities cho card và board
+    console.log("Updating activities");
+    card.activities = card.activities || [];
+    card.activities.push(activity._id);
+    board.activities = board.activities || [];
+    board.activities.push(activity._id);
+    await Promise.all([card.save(), board.save()]);
+    console.log("Activities updated");
+
+    // Gửi thông báo cho member bị xóa
+    console.log("Sending notification to removed member:", memberId);
+    const notification = new Notification({
+      user: memberId,
+      message: `Bạn đã bị xóa khỏi card "${card.title}" bởi ${userName}`,
+      type: "activity",
+      target: card._id,
+      targetModel: "Card",
+    });
+    await notification.save();
+    io.to(memberId.toString()).emit("new-notification", notification);
+    console.log("Notification sent");
+
+    // Phát sự kiện Socket.IO
+    console.log("Emitting member-removed-from-card event");
+    io.to(card.board.toString()).emit("member-removed-from-card", {
+      cardId,
+      memberId,
+      message: `${userName} đã xóa một thành viên khỏi card "${card.title}"`,
+    });
+
+    console.log("Member removed from card successfully:", { cardId, memberId });
+
+    // Trả về danh sách members cập nhật với populate
+    const updatedCard = await Card.findById(cardId)
+      .populate("members", "email fullName avatar");
+    res.status(200).json(updatedCard.members);
+  } catch (err) {
+    console.error("Error in removeMemberFromCard:", {
+      message: err.message,
+      stack: err.stack,
+      cardId,
+      memberId,
+      userId: req.user?._id?.toString(),
+      cardMembers: card?.members?.map(m => m?.toString()) || "unknown",
+    });
+    res.status(500).json({ message: "Lỗi khi xóa thành viên khỏi card", error: err.message });
+  }
+};
 
 module.exports = {
   createCard,
@@ -1223,4 +1381,5 @@ module.exports = {
   moveCard,
   addMember,
   toggleCardCompletion,
+  removeMemberFromCard,
 };

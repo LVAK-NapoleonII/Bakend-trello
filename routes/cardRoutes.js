@@ -840,6 +840,16 @@ module.exports = (io) => {
    *           type: string
    *           format: date-time
    */
-
+router.delete(
+  "/:cardId/members/:memberId",
+  authMiddleware,
+  activityMiddleware("member_removed_from_card", "Card", (req) => `User ${req.user.fullName} removed a member from card`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã xóa một thành viên khỏi card`,
+    "activity",
+    "Card"
+  ),
+  (req, res) => removeMemberFromCard(req, res, io)
+);
   return router;
 };
