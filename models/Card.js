@@ -6,13 +6,11 @@ const cardSchema = new mongoose.Schema(
     description: { type: String },
     list: { type: mongoose.Schema.Types.ObjectId, ref: "List", required: true },
     board: { type: mongoose.Schema.Types.ObjectId, ref: "Board", required: true },
-    members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
     cover: { type: String },
     dueDate: { type: Date },
     completed: { type: Boolean, default: false },
     position: { type: Number, default: 0 },
-
-    //  Phân việc và cộng tác
     checklists: [
       {
         title: String,
@@ -38,6 +36,8 @@ const cardSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity", default: [] }],
+    isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
