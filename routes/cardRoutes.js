@@ -11,7 +11,12 @@ const {
   toggleChecklistItem,
   moveCard,
   addMember,
-  toggleCardCompletion, // Thêm hàm mới
+  toggleCardCompletion,
+  removeMemberFromCard,
+  editChecklist,
+  deleteChecklist,
+  editChecklistItem,
+  deleteChecklistItem,
 } = require("../controllers/cardController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const activityMiddleware = require("../middlewares/activityMiddleware");
@@ -481,6 +486,132 @@ module.exports = (io) => {
 
   /**
    * @swagger
+   * /api/cards/{cardId}/checklists/{checklistIndex}:
+   *   put:
+   *     summary: Sửa tiêu đề checklist
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: cardId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *       - in: path
+   *         name: checklistIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của checklist trong mảng checklists
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - title
+   *             properties:
+   *               title:
+   *                 type: string
+   *                 example: "Updated Checklist Title"
+   *     responses:
+   *       200:
+   *         description: Cập nhật checklist thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Checklist'
+   *       400:
+   *         description: Thiếu title, card ID, hoặc checklist index không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền sửa checklist
+   *       404:
+   *         description: Không tìm thấy thẻ hoặc checklist
+   *       500:
+   *         description: Lỗi server
+   */
+  router.put(
+    "/:cardId/checklists/:checklistIndex",
+    authMiddleware,
+    activityMiddleware(
+      "checklist_updated",
+      "Card",
+      (req) => `User ${req.user.fullName} updated checklist "${req.body.title}"`
+    ),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã cập nhật checklist "${req.body.title}"`,
+      "activity",
+      "Card"
+    ),
+    (req, res) => editChecklist(req, res, io)
+  );
+
+  /**
+   * @swagger
+   * /api/cards/{cardId}/checklists/{checklistIndex}:
+   *   delete:
+   *     summary: Xóa checklist
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: cardId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *       - in: path
+   *         name: checklistIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của checklist trong mảng checklists
+   *     responses:
+   *       200:
+   *         description: Xóa checklist thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Checklist'
+   *       400:
+   *         description: Card ID hoặc checklist index không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền xóa checklist
+   *       404:
+   *         description: Không tìm thấy thẻ hoặc checklist
+   *       500:
+   *         description: Lỗi server
+   */
+  router.delete(
+    "/:cardId/checklists/:checklistIndex",
+    authMiddleware,
+    activityMiddleware(
+      "checklist_deleted",
+      "Card",
+      (req) => `User ${req.user.fullName} deleted a checklist`
+    ),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã xóa một checklist`,
+      "activity",
+      "Card"
+    ),
+    (req, res) => deleteChecklist(req, res, io)
+  );
+
+  /**
+   * @swagger
    * /api/cards/{cardId}/checklists/{checklistIndex}/items:
    *   post:
    *     summary: Thêm item vào checklist của thẻ
@@ -542,6 +673,144 @@ module.exports = (io) => {
       "Card"
     ),
     (req, res) => addChecklistItem(req, res, io)
+  );
+
+  /**
+   * @swagger
+   * /api/cards/{cardId}/checklists/{checklistIndex}/items/{itemIndex}:
+   *   put:
+   *     summary: Sửa nội dung checklist item
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: cardId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *       - in: path
+   *         name: checklistIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của checklist trong mảng checklists
+   *       - in: path
+   *         name: itemIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của item trong mảng items của checklist
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - text
+   *             properties:
+   *               text:
+   *                 type: string
+   *                 example: "Updated checklist item"
+   *     responses:
+   *       200:
+   *         description: Cập nhật checklist item thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Checklist'
+   *       400:
+   *         description: Thiếu text, card ID, checklist index, hoặc item index không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền sửa checklist item
+   *       404:
+   *         description: Không tìm thấy thẻ, checklist, hoặc item
+   *       500:
+   *         description: Lỗi server
+   */
+  router.put(
+    "/:cardId/checklists/:checklistIndex/items/:itemIndex",
+    authMiddleware,
+    activityMiddleware(
+      "checklist_item_updated",
+      "Card",
+      (req) => `User ${req.user.fullName} updated a checklist item to "${req.body.text}"`
+    ),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã cập nhật item "${req.body.text}" trong checklist`,
+      "activity",
+      "Card"
+    ),
+    (req, res) => editChecklistItem(req, res, io)
+  );
+
+  /**
+   * @swagger
+   * /api/cards/{cardId}/checklists/{checklistIndex}/items/{itemIndex}:
+   *   delete:
+   *     summary: Xóa checklist item
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: cardId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *       - in: path
+   *         name: checklistIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của checklist trong mảng checklists
+   *       - in: path
+   *         name: itemIndex
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Index của item trong mảng items của checklist
+   *     responses:
+   *       200:
+   *         description: Xóa checklist item thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Checklist'
+   *       400:
+   *         description: Card ID, checklist index, hoặc item index không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền xóa checklist item
+   *       404:
+   *         description: Không tìm thấy thẻ, checklist, hoặc item
+   *       500:
+   *         description: Lỗi server
+   */
+  router.delete(
+    "/:cardId/checklists/:checklistIndex/items/:itemIndex",
+    authMiddleware,
+    activityMiddleware(
+      "checklist_item_deleted",
+      "Card",
+      (req) => `User ${req.user.fullName} deleted a checklist item`
+    ),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã xóa một item trong checklist`,
+      "activity",
+      "Card"
+    ),
+    (req, res) => deleteChecklistItem(req, res, io)
   );
 
   /**
@@ -736,6 +1005,68 @@ module.exports = (io) => {
 
   /**
    * @swagger
+   * /api/cards/{cardId}/members/{memberId}:
+   *   delete:
+   *     summary: Xóa thành viên khỏi thẻ
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: cardId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *       - in: path
+   *         name: memberId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thành viên (phải là ObjectId hợp lệ)
+   *     responses:
+   *       200:
+   *         description: Xóa thành viên khỏi thẻ thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 type: object
+   *                 properties:
+   *                   _id:
+   *                     type: string
+   *                   email:
+   *                     type: string
+   *                   fullName:
+   *                     type: string
+   *                   avatar:
+   *                     type: string
+   *       400:
+   *         description: Card ID hoặc member ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền xóa thành viên
+   *       404:
+   *         description: Không tìm thấy thẻ hoặc thành viên
+   *       500:
+   *         description: Lỗi server
+   */
+  router.delete(
+    "/:cardId/members/:memberId",
+    authMiddleware,
+    activityMiddleware("member_removed_from_card", "Card", (req) => `User ${req.user.fullName} removed a member from card`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã xóa một thành viên khỏi card`,
+      "activity",
+      "Card"
+    ),
+    (req, res) => removeMemberFromCard(req, res, io)
+  );
+
+  /**
+   * @swagger
    * components:
    *   schemas:
    *     Card:
@@ -840,16 +1171,6 @@ module.exports = (io) => {
    *           type: string
    *           format: date-time
    */
-router.delete(
-  "/:cardId/members/:memberId",
-  authMiddleware,
-  activityMiddleware("member_removed_from_card", "Card", (req) => `User ${req.user.fullName} removed a member from card`),
-  notificationMiddleware(
-    (req) => `${req.user.fullName} đã xóa một thành viên khỏi card`,
-    "activity",
-    "Card"
-  ),
-  (req, res) => removeMemberFromCard(req, res, io)
-);
+
   return router;
 };

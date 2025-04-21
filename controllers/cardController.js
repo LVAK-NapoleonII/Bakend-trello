@@ -1367,6 +1367,407 @@ const removeMemberFromCard = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi khi xóa thành viên khỏi card", error: err.message });
   }
 };
+// Sửa tiêu đề checklist
+const editChecklist = async (req, res, io) => {
+  const { cardId, checklistIndex } = req.params;
+  const { title } = req.body;
+
+  try {
+    console.log("Editing checklist:", { cardId, checklistIndex, title, user: req.user?.email });
+
+    // Kiểm tra user
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    // Kiểm tra cardId
+    if (!mongoose.Types.ObjectId.isValid(cardId)) {
+      console.log("Invalid cardId:", cardId);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+
+    // Kiểm tra và chuyển đổi index
+    const index = parseInt(checklistIndex);
+    if (isNaN(index) || index < 0) {
+      console.log("Invalid checklistIndex:", checklistIndex);
+      return res.status(400).json({ message: "Checklist index không hợp lệ!" });
+    }
+
+    // Kiểm tra title
+    if (!title || typeof title !== "string") {
+      console.log("Invalid title:", title);
+      return res.status(400).json({ message: "Tiêu đề checklist là bắt buộc và phải là chuỗi!" });
+    }
+
+    // Tìm card
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      console.log("Card not found or deleted:", cardId);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+
+    // Tìm board
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    // Kiểm tra quyền thành viên
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền sửa checklist này!" });
+    }
+
+    // Kiểm tra checklist
+    if (!card.checklists[index]) {
+      console.log("Checklist not found:", index);
+      return res.status(404).json({ message: "Không tìm thấy checklist!" });
+    }
+
+    // Cập nhật tiêu đề checklist
+    card.checklists[index].title = title;
+    await card.save();
+
+    // Tạo activity
+    const userName = req.user.fullName || req.user.email || "Unknown User";
+    const activity = new Activity({
+      user: req.user._id,
+      action: "checklist_updated",
+      target: card._id,
+      targetModel: "Card",
+      details: `User ${userName} updated checklist title to "${title}" in card "${card.title}"`,
+    });
+    await activity.save();
+    card.activities.push(activity._id);
+    board.activities.push(activity._id);
+    await Promise.all([card.save(), board.save()]);
+
+    // Gửi thông báo qua Socket.IO
+    io.to(card.board.toString()).emit("checklist-updated", {
+      cardId,
+      checklistIndex: index,
+      title,
+      message: `${userName} đã cập nhật tiêu đề checklist thành "${title}" trong card "${card.title}"`,
+    });
+
+    console.log("Checklist updated successfully:", { cardId, checklistIndex, title });
+
+    res.status(200).json(card.checklists);
+  } catch (err) {
+    console.error("Error in editChecklist:", err.message, err.stack);
+    res.status(500).json({ message: "Lỗi khi sửa checklist", error: err.message });
+  }
+};
+
+// Xóa checklist
+const deleteChecklist = async (req, res, io) => {
+  const { cardId, checklistIndex } = req.params;
+
+  try {
+    console.log("Deleting checklist:", { cardId, checklistIndex, user: req.user?.email });
+
+    // Kiểm tra user
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    // Kiểm tra cardId
+    if (!mongoose.Types.ObjectId.isValid(cardId)) {
+      console.log("Invalid cardId:", cardId);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+
+    // Kiểm tra và chuyển đổi index
+    const index = parseInt(checklistIndex);
+    if (isNaN(index) || index < 0) {
+      console.log("Invalid checklistIndex:", checklistIndex);
+      return res.status(400).json({ message: "Checklist index không hợp lệ!" });
+    }
+
+    // Tìm card
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      console.log("Card not found or deleted:", cardId);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+
+    // Tìm board
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    // Kiểm tra quyền thành viên
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền xóa checklist này!" });
+    }
+
+    // Kiểm tra checklist
+    if (!card.checklists[index]) {
+      console.log("Checklist not found:", index);
+      return res.status(404).json({ message: "Không tìm thấy checklist!" });
+    }
+
+    // Lưu tiêu đề checklist để ghi activity
+    const checklistTitle = card.checklists[index].title;
+
+    // Xóa checklist
+    card.checklists.splice(index, 1);
+    await card.save();
+
+    // Tạo activity
+    const userName = req.user.fullName || req.user.email || "Unknown User";
+    const activity = new Activity({
+      user: req.user._id,
+      action: "checklist_deleted",
+      target: card._id,
+      targetModel: "Card",
+      details: `User ${userName} deleted checklist "${checklistTitle}" in card "${card.title}"`,
+    });
+    await activity.save();
+    card.activities.push(activity._id);
+    board.activities.push(activity._id);
+    await Promise.all([card.save(), board.save()]);
+
+    // Gửi thông báo qua Socket.IO
+    io.to(card.board.toString()).emit("checklist-deleted", {
+      cardId,
+      checklistIndex: index,
+      message: `${userName} đã xóa checklist "${checklistTitle}" trong card "${card.title}"`,
+    });
+
+    console.log("Checklist deleted successfully:", { cardId, checklistIndex });
+
+    res.status(200).json(card.checklists);
+  } catch (err) {
+    console.error("Error in deleteChecklist:", err.message, err.stack);
+    res.status(500).json({ message: "Lỗi khi xóa checklist", error: err.message });
+  }
+};
+
+// Sửa checklist item
+const editChecklistItem = async (req, res, io) => {
+  const { cardId, checklistIndex, itemIndex } = req.params;
+  const { text } = req.body;
+
+  try {
+    console.log("Editing checklist item:", {
+      cardId,
+      checklistIndex,
+      itemIndex,
+      text,
+      user: req.user?.email,
+    });
+
+    // Kiểm tra user
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    // Kiểm tra cardId
+    if (!mongoose.Types.ObjectId.isValid(cardId)) {
+      console.log("Invalid cardId:", cardId);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+
+    // Kiểm tra và chuyển đổi index
+    const checklistIdx = parseInt(checklistIndex);
+    const itemIdx = parseInt(itemIndex);
+    if (isNaN(checklistIdx) || checklistIdx < 0 || isNaN(itemIdx) || itemIdx < 0) {
+      console.log("Invalid indices:", { checklistIndex, itemIndex });
+      return res.status(400).json({ message: "Checklist index hoặc item index không hợp lệ!" });
+    }
+
+    // Kiểm tra text
+    if (!text || typeof text !== "string") {
+      console.log("Invalid text:", text);
+      return res.status(400).json({ message: "Nội dung item là bắt buộc và phải là chuỗi!" });
+    }
+
+    // Tìm card
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      console.log("Card not found or deleted:", cardId);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+
+    // Tìm board
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    // Kiểm tra quyền thành viên
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền sửa checklist item này!" });
+    }
+
+    // Kiểm tra checklist và item
+    if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
+      console.log("Checklist or item not found:", { checklistIdx, itemIdx });
+      return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
+    }
+
+    // Cập nhật nội dung item
+    card.checklists[checklistIdx].items[itemIdx].text = text;
+    await card.save();
+
+    // Tạo activity
+    const userName = req.user.fullName || req.user.email || "Unknown User";
+    const activity = new Activity({
+      user: req.user._id,
+      action: "checklist_item_updated",
+      target: card._id,
+      targetModel: "Card",
+      details: `User ${userName} updated checklist item to "${text}" in card "${card.title}"`,
+    });
+    await activity.save();
+    card.activities.push(activity._id);
+    board.activities.push(activity._id);
+    await Promise.all([card.save(), board.save()]);
+
+    // Gửi thông báo qua Socket.IO
+    io.to(card.board.toString()).emit("checklist-item-updated", {
+      cardId,
+      checklistIndex: checklistIdx,
+      itemIndex: itemIdx,
+      text,
+      message: `${userName} đã cập nhật item "${text}" trong checklist của card "${card.title}"`,
+    });
+
+    console.log("Checklist item updated successfully:", {
+      cardId,
+      checklistIndex: checklistIdx,
+      itemIndex: itemIdx,
+      text,
+    });
+
+    res.status(200).json(card.checklists);
+  } catch (err) {
+    console.error("Error in editChecklistItem:", err.message, err.stack);
+    res.status(500).json({ message: "Lỗi khi sửa checklist item", error: err.message });
+  }
+};
+
+// Xóa checklist item
+const deleteChecklistItem = async (req, res, io) => {
+  const { cardId, checklistIndex, itemIndex } = req.params;
+
+  try {
+    console.log("Deleting checklist item:", {
+      cardId,
+      checklistIndex,
+      itemIndex,
+      user: req.user?.email,
+    });
+
+    // Kiểm tra user
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    // Kiểm tra cardId
+    if (!mongoose.Types.ObjectId.isValid(cardId)) {
+      console.log("Invalid cardId:", cardId);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+
+    // Kiểm tra và chuyển đổi index
+    const checklistIdx = parseInt(checklistIndex);
+    const itemIdx = parseInt(itemIndex);
+    if (isNaN(checklistIdx) || checklistIdx < 0 || isNaN(itemIdx) || itemIdx < 0) {
+      console.log("Invalid indices:", { checklistIndex, itemIndex });
+      return res.status(400).json({ message: "Checklist index hoặc item index không hợp lệ!" });
+    }
+
+    // Tìm card
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      console.log("Card not found or deleted:", cardId);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+
+    // Tìm board
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    // Kiểm tra quyền thành viên
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền xóa checklist item này!" });
+    }
+
+    // Kiểm tra checklist và item
+    if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
+      console.log("Checklist or item not found:", { checklistIdx, itemIdx });
+      return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
+    }
+
+    // Lưu nội dung item để ghi activity
+    const itemText = card.checklists[checklistIdx].items[itemIdx].text;
+
+    // Xóa item
+    card.checklists[checklistIdx].items.splice(itemIdx, 1);
+    await card.save();
+
+    // Tạo activity
+    const userName = req.user.fullName || req.user.email || "Unknown User";
+    const activity = new Activity({
+      user: req.user._id,
+      action: "checklist_item_deleted",
+      target: card._id,
+      targetModel: "Card",
+      details: `User ${userName} deleted item "${itemText}" from checklist in card "${card.title}"`,
+    });
+    await activity.save();
+    card.activities.push(activity._id);
+    board.activities.push(activity._id);
+    await Promise.all([card.save(), board.save()]);
+
+    // Gửi thông báo qua Socket.IO
+    io.to(card.board.toString()).emit("checklist-item-deleted", {
+      cardId,
+      checklistIndex: checklistIdx,
+      itemIndex: itemIdx,
+      message: `${userName} đã xóa item "${itemText}" khỏi checklist trong card "${card.title}"`,
+    });
+
+    console.log("Checklist item deleted successfully:", {
+      cardId,
+      checklistIndex: checklistIdx,
+      itemIndex: itemIdx,
+    });
+
+    res.status(200).json(card.checklists);
+  } catch (err) {
+    console.error("Error in deleteChecklistItem:", err.message, err.stack);
+    res.status(500).json({ message: "Lỗi khi xóa checklist item", error: err.message });
+  }
+};
 
 module.exports = {
   createCard,
@@ -1382,4 +1783,8 @@ module.exports = {
   addMember,
   toggleCardCompletion,
   removeMemberFromCard,
+  editChecklist,
+  deleteChecklist, 
+  editChecklistItem, 
+  deleteChecklistItem, 
 };

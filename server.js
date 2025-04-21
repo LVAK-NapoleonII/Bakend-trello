@@ -13,7 +13,7 @@ const boardRoutes = require("./routes/boardRoutes");
 const listRoutes = require("./routes/listRoutes");
 const cardRoutes = require("./routes/cardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-
+const activityRoutes = require("./routes/activityRoutes");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -128,6 +128,7 @@ app.use("/api/boards", boardRoutes(io));
 app.use("/api/lists", listRoutes(io));
 app.use("/api/cards", cardRoutes(io));
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/activities", activityRoutes);
 
 // Kích hoạt Swagger API Docs
 swaggerDocs(app);

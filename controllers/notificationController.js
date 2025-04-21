@@ -1,75 +1,96 @@
 const Notification = require("../models/Notification");
+const User = require("../models/User");
 
-const getNotifications = async (req, res) => {
+exports.getNotifications = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
-
-    const notifications = await Notification.find({ user: req.user._id })
-      .populate("user", "fullName email")
-      .populate({
-        path: "target",
-        select: "title name",
-        match: { targetModel: { $in: ["Workspace", "Board", "List", "Card"] } },
-      })
+    const userId = req.user._id;
+    const notifications = await Notification.find({ 
+      user: userId,
+      isHidden: false 
+    })
       .sort({ createdAt: -1 })
-      .limit(50)
+      .populate("target", "name title")
       .lean();
 
-    res.status(200).json(notifications);
-  } catch (err) {
-    console.error("Error in getNotifications:", err.message, err.stack);
-    res.status(500).json({ message: "Lỗi server", error: err.message });
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+    res.status(200).json({ notifications, unreadCount });
+  } catch (error) {
+    console.error("Lỗi khi lấy thông báo:", error);
+    res.status(500).json({ message: "Lỗi khi lấy thông báo", error: error.message });
   }
 };
 
-const markNotificationAsRead = async (req, res) => {
+exports.markNotificationAsRead = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
+    const { notificationId } = req.params;
+    const userId = req.user._id;
 
-    const notification = await Notification.findOne({
-      _id: req.params.id,
-      user: req.user._id,
-    });
-
+    const notification = await Notification.findOne({ _id: notificationId, user: userId });
     if (!notification) {
-      return res.status(404).json({ message: "Không tìm thấy thông báo!" });
+      return res.status(404).json({ message: "Thông báo không tồn tại hoặc không thuộc về bạn" });
     }
 
     notification.isRead = true;
     await notification.save();
 
-    res.status(200).json({ message: "Đã đánh dấu thông báo là đã đọc!" });
-  } catch (err) {
-    console.error("Error in markNotificationAsRead:", err.message, err.stack);
-    res.status(500).json({ message: "Lỗi server", error: err.message });
+    res.status(200).json({ message: "Thông báo đã được đánh dấu là đã đọc", notification });
+  } catch (error) {
+    console.error("Lỗi khi đánh dấu thông báo đã đọc:", error);
+    res.status(500).json({ message: "Lỗi khi đánh dấu thông báo", error: error.message });
   }
 };
 
-const markAllNotificationsAsRead = async (req, res) => {
+exports.markAllNotificationsAsRead = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
+    const userId = req.user._id;
 
     await Notification.updateMany(
-      { user: req.user._id, isRead: false },
-      { isRead: true }
+      { user: userId, isRead: false, isHidden: false },
+      { $set: { isRead: true } }
     );
 
-    res.status(200).json({ message: "Đã đánh dấu tất cả thông báo là đã đọc!" });
-  } catch (err) {
-    console.error("Error in markAllNotificationsAsRead:", err.message, err.stack);
-    res.status(500).json({ message: "Lỗi server", error: err.message });
+    res.status(200).json({ message: "Tất cả thông báo đã được đánh dấu là đã đọc" });
+  } catch (error) {
+    console.error("Lỗi khi đánh dấu tất cả thông báo:", error);
+    res.status(500).json({ message: "Lỗi khi đánh dấu tất cả thông báo", error: error.message });
   }
 };
 
+exports.deleteNotification = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const userId = req.user._id;
 
-module.exports = {
-  getNotifications,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
+    const notification = await Notification.findOneAndUpdate(
+      { _id: notificationId, user: userId },
+      { $set: { isHidden: true } },
+      { new: true }
+    );
+
+    if (!notification) {
+      return res.status(404).json({ message: "Thông báo không tồn tại hoặc không thuộc về bạn" });
+    }
+
+    res.status(200).json({ message: "Thông báo đã được ẩn" });
+  } catch (error) {
+    console.error("Lỗi khi ẩn thông báo:", error);
+    res.status(500).json({ message: "Lỗi khi ẩn thông báo", error: error.message });
+  }
+};
+
+exports.deleteAllNotifications = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    await Notification.updateMany(
+      { user: userId, isHidden: false },
+      { $set: { isHidden: true } }
+    );
+
+    res.status(200).json({ message: "Tất cả thông báo đã được ẩn" });
+  } catch (error) {
+    console.error("Lỗi khi ẩn tất cả thông báo:", error);
+    res.status(500).json({ message: "Lỗi khi ẩn tất cả thông báo", error: error.message });
+  }
 };

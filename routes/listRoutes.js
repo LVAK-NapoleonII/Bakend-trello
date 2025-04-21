@@ -6,6 +6,7 @@ const {
   deleteList,
   updateCardOrder,
   updateListOrder,
+  getListById
 } = require("../controllers/listController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const activityMiddleware = require("../middlewares/activityMiddleware");
@@ -394,5 +395,59 @@ router.get("/boards/:boardId/lists", authMiddleware, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// Route mới: GET /api/lists/:id
+  /**
+   * @swagger
+   * /api/lists/{id}:
+   *   get:
+   *     summary: Lấy thông tin chi tiết của một cột
+   *     tags: [Lists]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của list (phải là ObjectId hợp lệ)
+   *     responses:
+   *       200:
+   *         description: Thông tin cột
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 _id:
+   *                   type: string
+   *                 title:
+   *                   type: string
+   *                 board:
+   *                   type: string
+   *                 position:
+   *                   type: number
+   *                 cardOrderIds:
+   *                   type: array
+   *                   items:
+   *                     type: string
+   *       400:
+   *         description: List ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền truy cập
+   *       404:
+   *         description: Không tìm thấy cột
+   *       500:
+   *         description: Lỗi server
+   */
+  router.get(
+    "/:id",
+    authMiddleware,
+    getListById
+  );
+
   return router;
 };

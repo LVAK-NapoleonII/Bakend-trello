@@ -18,6 +18,7 @@ const notificationSchema = new mongoose.Schema(
       enum: ["Workspace", "Board", "List", "Card", "Activity","User"],
     },
     isRead: { type: Boolean, default: false },
+    isHidden: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

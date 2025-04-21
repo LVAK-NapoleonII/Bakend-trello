@@ -4,6 +4,7 @@ const User = require("../models/User");
 const Workspace = require("../models/Workspace");
 const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
+const Card = require("../models/Card");
 const { io } = require("../server");
 // Tạo bảng
 const createBoard = async (req, res, io) => {
@@ -347,13 +348,6 @@ const inviteMember = async (req, res, io) => {
     const { boardId } = req.params;
     const { email, userId } = req.body;
 
-    console.log("Received invite request:", {
-      boardId,
-      email,
-      userId,
-      requester: req.user?.email || "unknown",
-    });
-
     if (!req.user || !req.user._id) {
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
@@ -385,7 +379,17 @@ const inviteMember = async (req, res, io) => {
         return res.status(404).json({ message: "Không tìm thấy người dùng!" });
       }
 
-      // Kiểm tra xem user đã có trong members chưa
+      // Kiểm tra trùng lặp
+      const matchingMembers = board.members.filter(
+        (m) => m.user.toString() === user._id.toString()
+      );
+      if (matchingMembers.length > 1) {
+        console.warn(`Duplicate members found for user ${userId} in board ${boardId}`);
+        board.members = board.members.filter(
+          (m) => m.user.toString() !== user._id.toString()
+        );
+      }
+
       const existingMember = board.members.find(
         (m) => m.user.toString() === user._id.toString()
       );
@@ -393,11 +397,9 @@ const inviteMember = async (req, res, io) => {
         if (existingMember.isActive) {
           return res.status(400).json({ message: "Người dùng đã là thành viên!" });
         } else {
-          // Cập nhật trạng thái isActive
           existingMember.isActive = true;
         }
       } else {
-        // Thêm mới nếu chưa có
         board.members.push({ user: user._id, isActive: true });
         isNewInvitation = true;
       }
@@ -550,14 +552,39 @@ const removeMember = async (req, res, io) => {
       return res.status(400).json({ message: "Không thể xóa chủ phòng!" });
     }
 
-    // Cập nhật trạng thái isActive thay vì thêm bản ghi mới
-    const memberIndex = board.members.findIndex(
-      (m) => m.user.toString() === userId && m.isActive
+    // Kiểm tra trùng lặp
+    const matchingMembers = board.members.filter(
+      (m) => m.user.toString() === userId
     );
-    if (memberIndex === -1) {
-      return res.status(400).json({ message: "Người dùng không phải thành viên active!" });
+    if (matchingMembers.length > 1) {
+      console.warn(`Duplicate members found for user ${userId} in board ${boardId}`);
+      // Chỉ giữ bản ghi có isActive: false hoặc bản ghi đầu tiên
+      board.members = board.members.filter(
+        (m) => m.user.toString() !== userId
+      );
+      board.members.push({ user: userId, isActive: false });
+    } else {
+      const memberIndex = board.members.findIndex(
+        (m) => m.user.toString() === userId && m.isActive
+      );
+      if (memberIndex === -1) {
+        return res.status(400).json({ message: "Người dùng không phải thành viên active!" });
+      }
+      board.members[memberIndex].isActive = false;
     }
-    board.members[memberIndex].isActive = false;
+
+    // Xóa thành viên khỏi card.members
+    const updatedCards = await Card.updateMany(
+      { board: boardId, "members._id": userId },
+      { $pull: { members: { _id: userId } } },
+      { multi: true }
+    );
+
+    const affectedCards = await Card.find(
+      { board: boardId, "members._id": userId },
+      "_id"
+    );
+    const cardIds = affectedCards.map((card) => card._id.toString());
 
     const workspace = await Workspace.findById(board.workspace);
     if (!workspace) {
@@ -607,6 +634,7 @@ const removeMember = async (req, res, io) => {
     io.to(boardId).emit("member-deactivated", {
       board: updatedBoard,
       deactivatedUserId: userId,
+      cardIds,
       message: `${user.fullName} đã bị xóa khỏi bảng "${board.title}" bởi ${req.user.fullName}`,
       workspaceRemoved: otherBoards.length === 0,
     });
@@ -614,6 +642,7 @@ const removeMember = async (req, res, io) => {
     io.to(userId).emit("member-deactivated", {
       board: updatedBoard,
       deactivatedUserId: userId,
+      cardIds,
       message: `Bạn đã bị xóa khỏi bảng "${board.title}"`,
       workspaceRemoved: otherBoards.length === 0,
     });
@@ -621,6 +650,7 @@ const removeMember = async (req, res, io) => {
     res.status(200).json({
       message: "Đã xóa thành viên khỏi bảng!",
       board: updatedBoard,
+      cardIds,
     });
   } catch (err) {
     console.error("Error in removeMember:", err.message, err.stack);
@@ -688,15 +718,32 @@ const leaveBoard = async (req, res, io) => {
     }
 
     const isMember = board.members.some(
-      m => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       return res.status(403).json({ message: "Bạn không phải thành viên của bảng này!" });
     }
 
-    board.members = board.members.map(member =>
-      member.user.toString() === req.user._id.toString() ? { ...member, isActive: false } : member
+    // Cập nhật trạng thái isActive
+    board.members = board.members.map((member) =>
+      member.user.toString() === req.user._id.toString()
+        ? { ...member, isActive: false }
+        : member
     );
+
+    // Xóa thành viên khỏi card.members trong tất cả thẻ
+    const updatedCards = await Card.updateMany(
+      { board: boardId, "members._id": req.user._id },
+      { $pull: { members: { _id: req.user._id } } },
+      { multi: true }
+    );
+
+    // Lấy danh sách cardIds bị ảnh hưởng
+    const affectedCards = await Card.find(
+      { board: boardId, "members._id": req.user._id },
+      "_id"
+    );
+    const cardIds = affectedCards.map((card) => card._id.toString());
 
     const workspace = await Workspace.findById(board.workspace);
     if (!workspace) {
@@ -708,7 +755,9 @@ const leaveBoard = async (req, res, io) => {
       "members.isActive": true,
     });
     if (otherBoards.length === 0) {
-      workspace.members = workspace.members.filter(m => m.toString() !== req.user._id.toString());
+      workspace.members = workspace.members.filter(
+        (m) => m.toString() !== req.user._id.toString()
+      );
       await workspace.save();
     }
 
@@ -738,18 +787,19 @@ const leaveBoard = async (req, res, io) => {
       .populate("members.user", "email avatar fullName")
       .populate("owner", "email fullName _id");
 
-    // Phát sự kiện cho tất cả thành viên còn lại
+    // Phát sự kiện member-deactivated với cardIds
     io.to(boardId).emit("member-deactivated", {
       board: updatedBoard,
       deactivatedUserId: req.user._id,
+      cardIds,
       message: `${req.user.fullName} đã rời khỏi bảng "${board.title}"`,
       workspaceRemoved: otherBoards.length === 0,
     });
 
-    // Phát sự kiện cho người rời để cập nhật giao diện
     io.to(req.user._id.toString()).emit("member-deactivated", {
       board: updatedBoard,
       deactivatedUserId: req.user._id,
+      cardIds,
       message: `Bạn đã rời khỏi bảng "${board.title}"`,
       workspaceRemoved: otherBoards.length === 0,
     });
@@ -757,6 +807,7 @@ const leaveBoard = async (req, res, io) => {
     res.status(200).json({
       message: "Đã rời khỏi bảng thành công!",
       board: updatedBoard,
+      cardIds,
       redirect: "/boards",
     });
   } catch (err) {
@@ -764,7 +815,6 @@ const leaveBoard = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi server khi rời bảng!", error: err.message });
   }
 };
-
 // Chuyển quyền sở hữu bảng
 const transferOwnership = async (req, res, io) => {
   try {

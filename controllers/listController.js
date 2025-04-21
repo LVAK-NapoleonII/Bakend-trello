@@ -341,8 +341,8 @@ const updateCardOrder = async (req, res, io) => {
     }
 
     // Cập nhật cardOrder
-    console.log("Updating list.cardOrder:", cardOrder);
-    list.cardOrder = cardOrder.map((id) => new mongoose.Types.ObjectId(id));
+    console.log("Updating list.cardOrderIds:", cardOrder);
+    list.cardOrderIds = cardOrder.map((id) => new mongoose.Types.ObjectId(id));
     await list.save();
     console.log("List saved successfully");
 
@@ -351,7 +351,7 @@ const updateCardOrder = async (req, res, io) => {
     console.log("Creating activity for user:", userName);
     const activity = new Activity({
       user: req.user._id,
-      action: "card-order", // Đảm bảo khớp với enum trong Activity
+      action: "card-order",
       target: list._id,
       targetModel: "List",
       details: `User ${userName} updated card order in list "${list.title}"`,
@@ -359,7 +359,12 @@ const updateCardOrder = async (req, res, io) => {
     await activity.save();
     console.log("Activity saved successfully");
 
-    // Phát sự kiện Socket.IO
+    // Cập nhật activities của board
+    board.activities = board.activities || [];
+    board.activities.push(activity._id);
+    await board.save();
+
+    // Phát sự kiện Socket.IO tới tất cả client
     console.log("Emitting card-order-updated event");
     io.to(list.board.toString()).emit("card-order-updated", {
       listId,
@@ -381,7 +386,6 @@ const updateCardOrder = async (req, res, io) => {
     return res.status(500).json({ message: "Lỗi server khi cập nhật thứ tự thẻ", error: err.message });
   }
 };
-
 // Xóa cột
 const deleteList = async (req, res, io) => {
   try {
@@ -599,7 +603,57 @@ const updateListOrder = async (req, res, io) => {
     return res.status(500).json({ message: "Lỗi server khi cập nhật thứ tự cột", error: err.message });
   }
 };
+const getListById = async (req, res) => {
+  try {
+    const listId = req.params.listId;
 
+    console.log("Fetching list:", { listId, user: req.user?.email });
+
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(listId)) {
+      console.log("Invalid listId:", listId);
+      return res.status(400).json({ message: "List ID không hợp lệ!" });
+    }
+
+    const list = await List.findOne({ _id: listId, isDeleted: false }).populate({
+      path: "activities",
+      match: { isHidden: false },
+    });
+
+    if (!list) {
+      console.log("List not found or deleted:", listId);
+      return res.status(404).json({ message: "Danh sách không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    const board = await Board.findOne({ _id: list.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", list.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền truy cập danh sách này!" });
+    }
+
+    // Lấy danh sách thẻ trong danh sách
+    const cards = await Card.find({ list: listId, isDeleted: false });
+
+    console.log("Found list:", { id: list._id.toString(), title: list.title, cards: cards.length });
+
+    res.status(200).json({ ...list.toObject(), cards });
+  } catch (err) {
+    console.error("Error in getListById:", err.message, err.stack);
+    res.status(500).json({ message: "Lỗi server", error: err.message });
+  }
+};
 module.exports = {
   createList,
   getListsByBoard,
@@ -607,4 +661,5 @@ module.exports = {
   deleteList,
   updateCardOrder,
   updateListOrder,
+  getListById,
 };

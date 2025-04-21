@@ -1,48 +1,36 @@
 const Notification = require("../models/Notification");
 const User = require("../models/User");
+const Card = require("../models/Card");
 
 const notificationMiddleware = (messageFn, type, targetModel) => {
   return async (req, res, next) => {
     try {
-      let userId;
+      let userId = req.user?._id;
       let targetId;
 
       console.log("notificationMiddleware:", {
         targetModel,
         params: req.params,
         body: req.body,
-        userId: req.user?._id?.toString(),
+        userId: userId?.toString(),
       });
 
-      if (targetModel === "User" && req.body.email && !req.user) {
-        const user = await User.findOne({ email: req.body.email });
-        if (!user) {
-          console.log("User not found:", req.body.email);
-          return res.status(404).json({ message: "User không tồn tại" });
-        }
-        userId = user._id;
-        targetId = user._id;
-      } else {
-        userId = req.user?._id;
-        if (!userId) {
-          console.log("No user found in req.user");
-          return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-        }
-        // Linh hoạt lấy targetId dựa trên route
-        targetId =
-          req.params.boardId||
-          req.params.cardId || // Cho các route như /api/cards/:cardId/comments
-          req.params.id ||     // Cho các route như /api/cards/:id
-          req.body.targetId ||
-          userId;
+      if (!userId) {
+        console.log("No user found in req.user");
+        return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
       }
+
+      targetId =
+        req.params.boardId ||
+        req.params.cardId ||
+        req.params.id ||
+        req.body.targetId ||
+        userId;
 
       if (!targetId) {
         console.log("No targetId found");
         return res.status(400).json({ message: "Thiếu ID mục tiêu!" });
       }
-
-      const message = messageFn(req);
 
       let Model;
       try {
@@ -60,20 +48,52 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
         return res.status(404).json({ message: `${targetModel} không tồn tại` });
       }
 
-      const notification = new Notification({
-        user: userId,
-        message,
-        type,
-        target: targetId,
-        targetModel,
-      });
-      await notification.save();
+      let recipients = [userId];
+      if (targetModel === "Card") {
+        const card = await Card.findById(targetId).populate("members");
+        if (card && card.members) {
+          recipients = [
+            ...new Set([
+              ...recipients,
+              ...card.members.map((member) => member._id.toString()),
+            ]),
+          ].filter((id) => id !== userId.toString());
+        }
+      } else if (targetModel === "Board") {
+        // Thêm logic nếu cần gửi thông báo cho thành viên board
+      }
 
-      const user = await User.findById(userId);
-      if (user) {
-        user.notifications = user.notifications || [];
-        user.notifications.push(notification._id);
-        await user.save();
+      const message = messageFn(req);
+
+      for (const recipientId of recipients) {
+        const notification = new Notification({
+          user: recipientId,
+          message,
+          type,
+          target: targetId,
+          targetModel,
+        });
+        await notification.save();
+
+        const user = await User.findById(recipientId);
+        if (user) {
+          user.notifications = user.notifications || [];
+          user.notifications.push(notification._id);
+          await user.save();
+
+          if (req.app.get("io")) {
+            req.app.get("io").to(recipientId.toString()).emit("new-notification", {
+              _id: notification._id,
+              user: recipientId,
+              message,
+              type,
+              target: targetId,
+              targetModel,
+              isRead: false,
+              createdAt: notification.createdAt,
+            });
+          }
+        }
       }
 
       next();
