@@ -8,7 +8,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
       let userId = req.user?._id;
       let targetId;
 
-      console.log("notificationMiddleware:", {
+      console.log("notificationMiddleware: Processing", {
         targetModel,
         params: req.params,
         body: req.body,
@@ -16,7 +16,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
       });
 
       if (!userId) {
-        console.log("No user found in req.user");
+        console.error("notificationMiddleware: No user found in req.user");
         return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
       }
 
@@ -28,7 +28,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
         userId;
 
       if (!targetId) {
-        console.log("No targetId found");
+        console.error("notificationMiddleware: No targetId found");
         return res.status(400).json({ message: "Thiếu ID mục tiêu!" });
       }
 
@@ -38,13 +38,13 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
         require.resolve(modelPath);
         Model = require(modelPath);
       } catch (error) {
-        console.error(`Model ${targetModel} not found:`, error.message);
+        console.error(`notificationMiddleware: Model ${targetModel} not found:`, error.message);
         return res.status(500).json({ message: `Model ${targetModel} không tồn tại` });
       }
 
       const target = await Model.findById(targetId);
       if (!target) {
-        console.log(`${targetModel} not found:`, targetId);
+        console.error(`notificationMiddleware: ${targetModel} not found for ID:`, targetId);
         return res.status(404).json({ message: `${targetModel} không tồn tại` });
       }
 
@@ -64,6 +64,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
       }
 
       const message = messageFn(req);
+      console.log("notificationMiddleware: Creating notification with message:", message);
 
       for (const recipientId of recipients) {
         const notification = new Notification({
@@ -74,6 +75,14 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
           targetModel,
         });
         await notification.save();
+        console.log("notificationMiddleware: Notification saved:", {
+          _id: notification._id,
+          user: recipientId,
+          message,
+          type,
+          target: targetId,
+          targetModel,
+        });
 
         const user = await User.findById(recipientId);
         if (user) {
@@ -82,6 +91,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
           await user.save();
 
           if (req.app.get("io")) {
+            console.log("notificationMiddleware: Emitting new-notification to:", recipientId.toString());
             req.app.get("io").to(recipientId.toString()).emit("new-notification", {
               _id: notification._id,
               user: recipientId,
@@ -90,15 +100,18 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
               target: targetId,
               targetModel,
               isRead: false,
+              isHidden: false,
               createdAt: notification.createdAt,
             });
+          } else {
+            console.warn("notificationMiddleware: Socket.IO instance not found");
           }
         }
       }
 
       next();
     } catch (error) {
-      console.error("Notification middleware error:", {
+      console.error("notificationMiddleware: Error:", {
         message: error.message,
         stack: error.stack,
         targetModel,

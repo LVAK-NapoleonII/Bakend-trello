@@ -4,6 +4,7 @@ const User = require("../models/User");
 exports.getNotifications = async (req, res) => {
   try {
     const userId = req.user._id;
+    console.log("getNotifications: Fetching for user:", userId);
     const notifications = await Notification.find({ 
       user: userId,
       isHidden: false 
@@ -13,10 +14,14 @@ exports.getNotifications = async (req, res) => {
       .lean();
 
     const unreadCount = notifications.filter((n) => !n.isRead).length;
+    console.log("getNotifications: Found", notifications.length, "notifications, unread:", unreadCount);
 
     res.status(200).json({ notifications, unreadCount });
   } catch (error) {
-    console.error("Lỗi khi lấy thông báo:", error);
+    console.error("getNotifications: Error fetching notifications:", {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ message: "Lỗi khi lấy thông báo", error: error.message });
   }
 };
@@ -36,7 +41,7 @@ exports.markNotificationAsRead = async (req, res) => {
 
     res.status(200).json({ message: "Thông báo đã được đánh dấu là đã đọc", notification });
   } catch (error) {
-    console.error("Lỗi khi đánh dấu thông báo đã đọc:", error);
+    console.error("markNotificationAsRead: Error:", error);
     res.status(500).json({ message: "Lỗi khi đánh dấu thông báo", error: error.message });
   }
 };
@@ -52,7 +57,7 @@ exports.markAllNotificationsAsRead = async (req, res) => {
 
     res.status(200).json({ message: "Tất cả thông báo đã được đánh dấu là đã đọc" });
   } catch (error) {
-    console.error("Lỗi khi đánh dấu tất cả thông báo:", error);
+    console.error("markAllNotificationsAsRead: Error:", error);
     res.status(500).json({ message: "Lỗi khi đánh dấu tất cả thông báo", error: error.message });
   }
 };
@@ -74,7 +79,7 @@ exports.deleteNotification = async (req, res) => {
 
     res.status(200).json({ message: "Thông báo đã được ẩn" });
   } catch (error) {
-    console.error("Lỗi khi ẩn thông báo:", error);
+    console.error("deleteNotification: Error:", error);
     res.status(500).json({ message: "Lỗi khi ẩn thông báo", error: error.message });
   }
 };
@@ -90,7 +95,7 @@ exports.deleteAllNotifications = async (req, res) => {
 
     res.status(200).json({ message: "Tất cả thông báo đã được ẩn" });
   } catch (error) {
-    console.error("Lỗi khi ẩn tất cả thông báo:", error);
+    console.error("deleteAllNotifications: Error:", error);
     res.status(500).json({ message: "Lỗi khi ẩn tất cả thông báo", error: error.message });
   }
 };

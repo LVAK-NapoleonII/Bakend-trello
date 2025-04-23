@@ -2,7 +2,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendOTP = require("../utils/sendOTP");
-const Board = require("../models/Board")
+const Board = require("../models/Board");
 
 const generateRefreshToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
@@ -32,7 +32,7 @@ const register = async (req, res) => {
     user = new User({
       fullName,
       email,
-      password, // Không hash thủ công, dựa vào schema
+      password,
       otp,
       otpExpires,
       avatar: avatarUrl,
@@ -78,7 +78,7 @@ const verifyOTP = async (req, res) => {
 const login = async (req, res, io) => {
   try {
     const { email, password } = req.body;
-    console.log("Login attempt:", { email, password });
+    console.log("Login attempt:", { email });
 
     const user = await User.findOne({ email });
     if (!user) {
@@ -107,17 +107,43 @@ const login = async (req, res, io) => {
 
     io.emit("user-login", user._id);
 
+    const userData = {
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      avatar: user.avatar,
+    };
+    console.log("Login response user data:", userData);
+
     res.status(200).json({
       token,
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        avatar: user.avatar,
-      },
+      user: userData,
     });
   } catch (error) {
     console.error("Error in login:", error.message);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId).select("_id fullName email avatar");
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    const userData = {
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      avatar: user.avatar,
+    };
+    console.log("Profile response user data:", userData);
+
+    res.status(200).json({ user: userData });
+  } catch (error) {
+    console.error("Error in getProfile:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -182,7 +208,7 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "OTP không hợp lệ hoặc đã hết hạn" });
     }
 
-    user.password = newPassword; // Không hash thủ công
+    user.password = newPassword;
     user.otp = null;
     user.otpExpires = null;
     await user.save();
@@ -216,7 +242,7 @@ const updateAvatar = async (req, res) => {
     res.status(200).json({
       message: "Cập nhật avatar thành công",
       user: {
-        id: user._id,
+        _id: user._id,
         fullName: user.fullName,
         email: user.email,
         avatar: user.avatar,
@@ -244,6 +270,7 @@ const logout = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi server" });
   }
 };
+
 const searchUsers = async (req, res) => {
   try {
     const { query, boardId } = req.query;
@@ -251,7 +278,6 @@ const searchUsers = async (req, res) => {
       return res.status(400).json({ message: "Query là bắt buộc!" });
     }
 
-    // Tìm kiếm người dùng theo email hoặc tên
     const users = await User.find({
       $or: [
         { email: { $regex: query, $options: "i" } },
@@ -259,19 +285,17 @@ const searchUsers = async (req, res) => {
       ],
     }).select("_id email fullName avatar");
 
-    // Nếu có boardId, lấy danh sách người đã rời đi
     let pastMembers = [];
     if (boardId && mongoose.Types.ObjectId.isValid(boardId)) {
       const board = await Board.findById(boardId);
       if (board) {
         pastMembers = board.members
-          .filter(m => !m.isActive)
-          .map(m => m.user.toString());
+          .filter((m) => !m.isActive)
+          .map((m) => m.user.toString());
       }
     }
 
-    // Gắn cờ để đánh dấu người đã rời
-    const enrichedUsers = users.map(user => ({
+    const enrichedUsers = users.map((user) => ({
       ...user.toObject(),
       isPastMember: pastMembers.includes(user._id.toString()),
     }));
@@ -283,4 +307,15 @@ const searchUsers = async (req, res) => {
   }
 };
 
-module.exports = { register, verifyOTP, login, forgotPassword, resetPassword, updateAvatar, refreshToken, logout, searchUsers };
+module.exports = {
+  register,
+  verifyOTP,
+  login,
+  getProfile,
+  forgotPassword,
+  resetPassword,
+  updateAvatar,
+  refreshToken,
+  logout,
+  searchUsers,
+};
