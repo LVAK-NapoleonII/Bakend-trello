@@ -11,7 +11,7 @@ const authRoutes = require("./routes/authRoutes");
 const workspaceRoutes = require("./routes/workspaceRoutes");
 const boardRoutes = require("./routes/boardRoutes");
 const listRoutes = require("./routes/listRoutes");
-const cardRoutes = require("./routes/cardRoutes"); // Sửa tên import
+const cardRoutes = require("./routes/cardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const activityRoutes = require("./routes/activityRoutes");
 const Notification = require("./models/Notification");
@@ -42,6 +42,7 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
+app.use("/Uploads", express.static(path.join(__dirname, "Uploads"))); // Phục vụ thư mục Uploads
 
 // Socket.IO
 io.on("connection", (socket) => {
@@ -129,7 +130,7 @@ app.use("/api/auth", authRoutes(io));
 app.use("/api/workspaces", workspaceRoutes(io));
 app.use("/api/boards", boardRoutes(io));
 app.use("/api/lists", listRoutes(io));
-app.use("/api/cards", cardRoutes(io)); // Sửa tên biến
+app.use("/api/cards", cardRoutes(io));
 app.use("/api/activities", activityRoutes);
 app.use("/api/notifications", notificationRoutes);
 

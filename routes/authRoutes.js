@@ -181,30 +181,54 @@ module.exports = (io) => {
   router.post("/refresh-token", refreshToken);
 
   /**
-   * @swagger
-   * /api/auth/profile:
-   *   get:
-   *     summary: Lấy thông tin người dùng
-   *     tags: [Auth]
-   *     security:
-   *       - BearerAuth: []
-   *     responses:
-   *       200:
-   *         description: Trả về thông tin người dùng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
-   */
-  router.get("/profile", authMiddleware, (req, res) => {
+ * @swagger
+ * /api/auth/update-profile:
+ *   put:
+ *     summary: Cập nhật hồ sơ người dùng
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               bio:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Cập nhật hồ sơ thành công
+ *       400:
+ *         description: Thiếu thông tin
+ *       401:
+ *         description: Không có token hoặc token không hợp lệ
+ *       500:
+ *         description: Lỗi server
+ */
+  router.get("/profile", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("_id fullName email avatar");
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
     res.json({
       message: "Chào mừng bạn!",
       user: {
-        id: req.user._id,
-        email: req.user.email,
-        fullName: req.user.fullName,
-        avatar: req.user.avatar,
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        avatar: user.avatar,
       },
     });
-  });
+  } catch (error) {
+    console.error("Profile: Error:", error.message);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+});
 
   /**
    * @swagger

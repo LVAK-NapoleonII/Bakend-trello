@@ -41,15 +41,16 @@ const register = async (req, res) => {
 
     try {
       await sendOTP(email, otp);
+      console.log("Register: OTP sent to:", email);
     } catch (emailError) {
       await User.deleteOne({ email });
-      console.error("Failed to send OTP:", emailError.message);
+      console.error("Register: Failed to send OTP:", emailError.message);
       return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau" });
     }
 
     res.status(201).json({ message: "Đăng ký thành công! Vui lòng kiểm tra email để xác nhận OTP." });
   } catch (error) {
-    console.error("Error in register:", error.message);
+    console.error("Register: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -70,7 +71,7 @@ const verifyOTP = async (req, res) => {
 
     res.status(200).json({ message: "Xác thực OTP thành công! Bạn có thể đăng nhập ngay bây giờ." });
   } catch (error) {
-    console.error("Error in verifyOTP:", error.message);
+    console.error("VerifyOTP: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -120,7 +121,7 @@ const login = async (req, res, io) => {
       user: userData,
     });
   } catch (error) {
-    console.error("Error in login:", error.message);
+    console.error("Login: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -143,7 +144,7 @@ const getProfile = async (req, res) => {
 
     res.status(200).json({ user: userData });
   } catch (error) {
-    console.error("Error in getProfile:", error.message);
+    console.error("GetProfile: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -166,7 +167,7 @@ const refreshToken = async (req, res) => {
 
     res.status(200).json({ token: newToken });
   } catch (error) {
-    console.error("Error in refreshToken:", error.message);
+    console.error("RefreshToken: Error:", error.message);
     res.status(401).json({ message: "Refresh token không hợp lệ" });
   }
 };
@@ -181,19 +182,20 @@ const forgotPassword = async (req, res) => {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = otp;
-    user.otpExpires = Date.now() + 10 * 60 * 1000;
+    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
     try {
       await sendOTP(email, otp);
+      console.log("ForgotPassword: OTP sent to:", email);
     } catch (emailError) {
-      console.error("Failed to send OTP for forgot password:", emailError.message);
+      console.error("ForgotPassword: Failed to send OTP:", emailError.message);
       return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau" });
     }
 
     res.status(200).json({ message: "OTP đã gửi qua email" });
   } catch (error) {
-    console.error("Error in forgotPassword:", error.message);
+    console.error("ForgotPassword: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -204,7 +206,7 @@ const resetPassword = async (req, res) => {
     const user = await User.findOne({ email });
 
     if (!user) return res.status(400).json({ message: "Email không tồn tại" });
-    if (user.otp !== otp || user.otpExpires < Date.now()) {
+    if (user.otp !== otp || user.otpExpires < new Date()) {
       return res.status(400).json({ message: "OTP không hợp lệ hoặc đã hết hạn" });
     }
 
@@ -215,7 +217,7 @@ const resetPassword = async (req, res) => {
 
     res.status(200).json({ message: "Mật khẩu đã được cập nhật thành công" });
   } catch (error) {
-    console.error("Error in resetPassword:", error.message);
+    console.error("ResetPassword: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -229,7 +231,7 @@ const updateAvatar = async (req, res) => {
       return res.status(400).json({ message: "Vui lòng upload file avatar" });
     }
 
-    const avatarUrl = `/uploads/${file.filename}`;
+    const avatarUrl = `/Uploads/${file.filename}`;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -249,7 +251,7 @@ const updateAvatar = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error in updateAvatar:", error.message);
+    console.error("UpdateAvatar: Error:", error.message);
     if (error.code === "ENOENT") {
       return res.status(500).json({ message: "Thư mục uploads không tồn tại hoặc không có quyền ghi" });
     }
@@ -266,7 +268,7 @@ const logout = async (req, res, io) => {
     res.clearCookie("refreshToken");
     res.status(200).json({ message: "Đăng xuất thành công" });
   } catch (error) {
-    console.error("Error in logout:", error.message);
+    console.error("Logout: Error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -302,7 +304,7 @@ const searchUsers = async (req, res) => {
 
     res.status(200).json({ users: enrichedUsers });
   } catch (err) {
-    console.error("Error in searchUsers:", err.message);
+    console.error("SearchUsers: Error:", err.message);
     res.status(500).json({ message: "Lỗi server", error: err.message });
   }
 };
