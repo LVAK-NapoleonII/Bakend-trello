@@ -286,15 +286,7 @@ module.exports = (io) => {
    *       500:
    *         description: Lỗi server
    */
-  router.post(
-    "/reset-password",
-    notificationMiddleware(
-      (req) => `Mật khẩu của bạn đã được đặt lại thành công`,
-      "general",
-      "User"
-    ),
-    resetPassword
-  );
+  router.post("/reset-password", resetPassword);
 
   /**
    * @swagger

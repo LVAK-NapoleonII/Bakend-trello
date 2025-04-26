@@ -42,7 +42,7 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
-app.use("/Uploads", express.static(path.join(__dirname, "Uploads"))); // Phục vụ thư mục Uploads
+app.use("/Uploads", express.static(path.join(__dirname, "Uploads")));
 
 // Socket.IO
 io.on("connection", (socket) => {
@@ -71,6 +71,41 @@ io.on("connection", (socket) => {
   socket.on("refresh-sidebar", ({ userId }) => {
     console.log(`Server: Refresh sidebar for user: ${userId}`);
     io.to(userId).emit("refresh-sidebar");
+  });
+
+  socket.on("list-created", ({ boardId, list }) => {
+    console.log(`Server: List created in board ${boardId}:`, list);
+    io.to(boardId).emit("list-created", { boardId, list });
+  });
+
+  socket.on("list-deleted", ({ boardId, listId }) => {
+    console.log(`Server: List deleted in board ${boardId}:`, listId);
+    io.to(boardId).emit("list-deleted", { boardId, listId });
+  });
+
+  socket.on("list-order-updated", ({ boardId, columnOrder }) => {
+    console.log(`Server: List order updated in board ${boardId}:`, columnOrder);
+    io.to(boardId).emit("list-order-updated", { boardId, columnOrder });
+  });
+
+  socket.on("card-created", ({ boardId, listId, card }) => {
+    console.log(`Server: Card created in list ${listId}:`, card);
+    io.to(boardId).emit("card-created", { boardId, listId, card });
+  });
+
+  socket.on("card-deleted", ({ boardId, listId, cardId }) => {
+    console.log(`Server: Card deleted in list ${listId}:`, cardId);
+    io.to(boardId).emit("card-deleted", { boardId, listId, cardId });
+  });
+
+  socket.on("card-moved", ({ card, oldListId, newListId, newPosition }) => {
+    console.log(`Server: Card moved from ${oldListId} to ${newListId}:`, card);
+    io.to(card.board).emit("card-moved", { card, oldListId, newListId, newPosition });
+  });
+
+  socket.on("card-order-updated", ({ listId, cardOrder }) => {
+    console.log(`Server: Card order updated in list ${listId}:`, cardOrder);
+    io.to(listId).emit("card-order-updated", { listId, cardOrder });
   });
 
   socket.on("member-added", ({ cardId, members }) => {
@@ -105,12 +140,7 @@ io.on("connection", (socket) => {
 
   socket.on("card-updated", ({ cardId, card }) => {
     console.log(`Server: Card updated: ${cardId}`, card);
-    io.to(cardId).emit("card-updated", { cardId, card });
-  });
-
-  socket.on("card-deleted", ({ cardId }) => {
-    console.log(`Server: Card deleted: ${cardId}`);
-    io.to(cardId).emit("card-deleted", { cardId });
+    io.to(card.board).emit("card-updated", { cardId, card });
   });
 
   socket.on("card-completion-toggled", ({ cardId, completed }) => {
