@@ -1,4 +1,3 @@
-// controllers/cardController.js
 const mongoose = require("mongoose");
 const Card = require("../models/Card");
 const List = require("../models/List");
@@ -10,7 +9,7 @@ const User = require("../models/User");
 // Tạo thẻ mới
 const createCard = async (req, res, io) => {
   try {
-    const { title, description, list, board, } = req.body;
+    const { title, description, list, board } = req.body;
 
     console.log("Received createCard request:", {
       title,
@@ -55,7 +54,7 @@ const createCard = async (req, res, io) => {
       return res.status(404).json({ message: "List không tồn tại hoặc đã bị ẩn!" });
     }
 
-    const boardExists = await Board.findOne({ _id: board, isDeleted: false });
+    const boardExists = await Board.findOne({ _id: board, isDeleted: false }).populate("members.user");
     if (!boardExists) {
       console.log("Board not found or deleted:", board);
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
@@ -67,7 +66,7 @@ const createCard = async (req, res, io) => {
     }
 
     const isMember = boardExists.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -115,8 +114,8 @@ const createCard = async (req, res, io) => {
 
     const populatedCard = await Card.findById(card._id)
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     io.to(board.toString()).emit("card-created", {
@@ -182,8 +181,8 @@ const getCardsByList = async (req, res) => {
 
     const cards = await Card.find({ list: listId, isDeleted: false })
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     const orderedCards = (listExists.cardOrderIds || [])
@@ -221,13 +220,13 @@ const updateCard = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       return res.status(404).json({ message: "Board không tồn tại!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       return res.status(403).json({ message: "Bạn không có quyền cập nhật thẻ!" });
@@ -250,12 +249,18 @@ const updateCard = async (req, res, io) => {
     card.activities.push(activity._id);
     await card.save();
 
+    const populatedCard = await Card.findById(cardId)
+      .populate("members", "email fullName avatar")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
+      .populate({ path: "activities", match: { isDeleted: false } });
+
     io.to(card.board.toString()).emit("card-updated", {
-      card,
+      card: populatedCard,
       message: `${userName} đã cập nhật card "${card.title}"`,
     });
 
-    return res.status(200).json(card);
+    return res.status(200).json(populatedCard);
   } catch (err) {
     console.error("Error in updateCard:", err.message);
     return res.status(500).json({ message: "Lỗi khi cập nhật thẻ", error: err.message });
@@ -280,13 +285,13 @@ const deleteCard = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       return res.status(404).json({ message: "Board không tồn tại!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       return res.status(403).json({ message: "Bạn không có quyền xóa thẻ!" });
@@ -369,14 +374,14 @@ const addComment = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board?.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -387,6 +392,7 @@ const addComment = async (req, res, io) => {
       user: req.user._id,
       text,
       createdAt: new Date(),
+      _id: new mongoose.Types.ObjectId(),
     };
 
     card.comments.push(comment);
@@ -421,13 +427,20 @@ const addComment = async (req, res, io) => {
 
     const updatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     io.to(card.board.toString()).emit("comment-added", {
       cardId,
-      comment,
+      comment: {
+        ...comment,
+        user: {
+          _id: req.user._id,
+          fullName: req.user.fullName,
+          avatar: req.user.avatar,
+        },
+      },
       message: `${userName} đã thêm bình luận vào card "${card.title}"`,
     });
 
@@ -480,14 +493,14 @@ const addNote = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -498,6 +511,7 @@ const addNote = async (req, res, io) => {
       content,
       createdBy: req.user._id,
       createdAt: new Date(),
+      _id: new mongoose.Types.ObjectId(),
     };
 
     card.notes.push(note);
@@ -518,13 +532,20 @@ const addNote = async (req, res, io) => {
 
     const updatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     io.to(card.board.toString()).emit("note-added", {
       cardId,
-      note,
+      note: {
+        ...note,
+        createdBy: {
+          _id: req.user._id,
+          fullName: req.user.fullName,
+          avatar: req.user.avatar,
+        },
+      },
       message: `${userName} đã thêm ghi chú vào card "${card.title}"`,
     });
 
@@ -566,14 +587,14 @@ const addChecklist = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -581,6 +602,7 @@ const addChecklist = async (req, res, io) => {
     }
 
     const checklist = {
+      _id: new mongoose.Types.ObjectId(),
       title,
       items: [],
     };
@@ -607,7 +629,7 @@ const addChecklist = async (req, res, io) => {
       message: `${userName} đã thêm checklist "${title}" vào card "${card.title}"`,
     });
 
-    console.log("Checklist added successfully:", { cardId, checklistTitle: title });
+    console.log("Checklist added successfully:", { cardId, checklistId: checklist._id });
 
     res.status(200).json(card.checklists);
   } catch (err) {
@@ -619,58 +641,62 @@ const addChecklist = async (req, res, io) => {
 // Thêm item vào checklist
 const addChecklistItem = async (req, res, io) => {
   const { cardId, checklistIndex } = req.params;
-  const { text } = req.body;
+  const { text, version } = req.body;
 
   try {
     console.log("Adding checklist item:", { cardId, checklistIndex, text, user: req.user?.email });
 
     if (!req.user || !req.user._id) {
-      console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
     if (!text || typeof text !== "string") {
-      console.log("Invalid text:", text);
       return res.status(400).json({ message: "Text là bắt buộc và phải là chuỗi!" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
-      console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
     const index = parseInt(checklistIndex);
     if (isNaN(index) || index < 0) {
-      console.log("Invalid checklistIndex:", checklistIndex);
       return res.status(400).json({ message: "Checklist index không hợp lệ!" });
     }
 
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
-      console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (version !== undefined && card.version !== version) {
+      return res.status(409).json({ message: "Xung đột dữ liệu, vui lòng làm mới!" });
+    }
+
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
-      console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
-      console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền thêm item vào checklist này!" });
     }
 
     if (!card.checklists[index]) {
-      console.log("Checklist not found:", index);
       return res.status(404).json({ message: "Không tìm thấy checklist!" });
     }
 
-    card.checklists[index].items.push({ text, completed: false });
+    const newItem = {
+      _id: new mongoose.Types.ObjectId(),
+      text,
+      completed: false,
+      createdAt: new Date(),
+    };
+
+    card.checklists[index].items.push(newItem);
+    card.version += 1;
     await card.save();
 
     const userName = req.user.fullName || req.user.email || "Unknown User";
@@ -688,14 +714,20 @@ const addChecklistItem = async (req, res, io) => {
 
     io.to(card.board.toString()).emit("checklist-item-added", {
       cardId,
-      checklistIndex: index,
-      item: { text, completed: false },
+      checklistIndex: parseInt(checklistIndex),
+      item: newItem,
+      checklist: {
+        _id: card.checklists[index]._id,
+        title: card.checklists[index].title,
+        items: card.checklists[index].items,
+      },
       message: `${userName} đã thêm item "${text}" vào checklist trong card "${card.title}"`,
+      actorId: req.user._id.toString(),
     });
 
-    console.log("Checklist item added successfully:", { cardId, checklistIndex, text });
+    console.log("Checklist item added successfully:", { cardId, checklistId: card.checklists[index]._id, text });
 
-    res.status(200).json(card.checklists);
+    res.status(200).json({ checklists: card.checklists, version: card.version });
   } catch (err) {
     console.error("Error in addChecklistItem:", err.message, err.stack);
     res.status(500).json({ message: "Lỗi khi thêm item vào checklist", error: err.message });
@@ -705,6 +737,7 @@ const addChecklistItem = async (req, res, io) => {
 // Đánh dấu hoàn thành/không hoàn thành checklist item
 const toggleChecklistItem = async (req, res, io) => {
   const { cardId, checklistIndex, itemIndex } = req.params;
+  const { version } = req.body;
 
   try {
     console.log("Toggling checklist item:", {
@@ -714,77 +747,50 @@ const toggleChecklistItem = async (req, res, io) => {
       user: req.user?.email,
     });
 
-    // Kiểm tra user
     if (!req.user || !req.user._id) {
-      console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    // Kiểm tra cardId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
-      console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
-    // Kiểm tra và chuyển đổi index
     const checklistIdx = parseInt(checklistIndex);
     const itemIdx = parseInt(itemIndex);
     if (isNaN(checklistIdx) || checklistIdx < 0 || isNaN(itemIdx) || itemIdx < 0) {
-      console.log("Invalid indices:", { checklistIndex, itemIndex });
       return res.status(400).json({ message: "Checklist index hoặc item index không hợp lệ!" });
     }
 
-    // Tìm card
-    console.log("Finding card:", cardId);
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
-      console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    // Tìm board
-    console.log("Finding board:", card.board);
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (version !== undefined && card.version !== version) {
+      return res.status(409).json({ message: "Xung đột dữ liệu, vui lòng làm mới!" });
+    }
+
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
-      console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
-    // Kiểm tra quyền thành viên
-    console.log("Checking member permission for user:", req.user._id.toString());
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
-      console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền cập nhật checklist này!" });
     }
 
-    // Kiểm tra checklists
-    console.log("Checking checklists array:", card.checklists?.length);
-    if (!card.checklists || !Array.isArray(card.checklists)) {
-      console.log("Checklists not initialized for card:", cardId);
-      return res.status(404).json({ message: "Checklist không tồn tại!" });
-    }
-
-    // Kiểm tra checklist và item
-    console.log("Checking checklist and item:", { checklistIdx, itemIdx });
     if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
-      console.log("Checklist or item not found:", { checklistIdx, itemIdx });
       return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
     }
 
-    // Toggle trạng thái completed
-    console.log("Toggling item completed status");
     const item = card.checklists[checklistIdx].items[itemIdx];
     item.completed = !item.completed;
-
-    // Lưu card
-    console.log("Saving card");
+    card.version += 1;
     await card.save();
 
-    // Tạo activity
-    console.log("Creating activity");
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const action = item.completed ? "checklist_item_completed" : "checklist_item_uncompleted";
     const activity = new Activity({
@@ -796,19 +802,14 @@ const toggleChecklistItem = async (req, res, io) => {
     });
     await activity.save();
 
-    // Cập nhật activities cho card và board
-    console.log("Updating activities");
     card.activities = card.activities || [];
     card.activities.push(activity._id);
     board.activities = board.activities || [];
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
-    // Gửi thông báo cho các thành viên khác
-    console.log("Sending notifications to members:", card.members?.length);
     for (const memberId of card.members) {
       if (memberId.toString() !== req.user._id.toString()) {
-        console.log("Creating notification for member:", memberId.toString());
         const notification = new Notification({
           user: memberId,
           message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.text}" trong card "${card.title}"`,
@@ -821,25 +822,28 @@ const toggleChecklistItem = async (req, res, io) => {
       }
     }
 
-    // Phát sự kiện Socket.IO
-    console.log("Emitting checklist-item-toggled event");
     io.to(card.board.toString()).emit("checklist-item-toggled", {
       cardId,
       checklistIndex: checklistIdx,
       itemIndex: itemIdx,
       completed: item.completed,
+      checklist: {
+        _id: card.checklists[checklistIdx]._id,
+        title: card.checklists[checklistIdx].title,
+        items: card.checklists[checklistIdx].items,
+      },
       message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.text}" trong card "${card.title}"`,
+      actorId: req.user._id.toString(),
     });
 
     console.log("Checklist item toggled successfully:", {
       cardId,
-      checklistIndex: checklistIdx,
+      checklistId: card.checklists[checklistIdx]._id,
       itemIndex: itemIdx,
       completed: item.completed,
     });
 
-    // Trả về toàn bộ checklists
-    res.status(200).json(card.checklists);
+    res.status(200).json({ checklists: card.checklists, version: card.version });
   } catch (err) {
     console.error("Error in toggleChecklistItem:", {
       message: err.message,
@@ -862,8 +866,6 @@ const moveCard = async (req, res, io) => {
 
     console.log("Received moveCard request:", {
       cardId,
-      cardIdType: typeof cardId,
-      cardIdLength: cardId?.length,
       newListId,
       newBoardId,
       newPosition,
@@ -907,7 +909,7 @@ const moveCard = async (req, res, io) => {
       return res.status(404).json({ message: "List đích không tồn tại hoặc đã bị ẩn!" });
     }
 
-    const newBoard = await Board.findOne({ _id: newBoardId, isDeleted: false });
+    const newBoard = await Board.findOne({ _id: newBoardId, isDeleted: false }).populate("members.user");
     if (!newBoard) {
       console.log("New board not found or deleted:", newBoardId);
       return res.status(404).json({ message: "Board đích không tồn tại hoặc đã bị ẩn!" });
@@ -919,7 +921,7 @@ const moveCard = async (req, res, io) => {
     }
 
     const isMember = newBoard.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -1005,8 +1007,8 @@ const moveCard = async (req, res, io) => {
 
     const updatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     io.to(newBoardId).emit("card-moved", {
@@ -1083,14 +1085,14 @@ const addMember = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
@@ -1098,7 +1100,7 @@ const addMember = async (req, res, io) => {
     }
 
     const isBoardMember = board.members.some(
-      (m) => m.user && m.user.toString() === memberId && m.isActive
+      (m) => m.user && m.user._id.toString() === memberId && m.isActive
     );
     if (!isBoardMember) {
       console.log("Member not in board:", memberId);
@@ -1144,14 +1146,19 @@ const addMember = async (req, res, io) => {
     io.to(memberId.toString()).emit("new-notification", notification);
 
     const updatedCard = await Card.findById(cardId)
-      .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName")
-      .populate("notes.createdBy", "email fullName")
+      .populate("members", "email fullName avatar")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
       .populate({ path: "activities", match: { isDeleted: false } });
 
     io.to(card.board.toString()).emit("member-added", {
       cardId,
-      member: { _id: memberId, fullName: memberName, email: member.email },
+      member: {
+        _id: member._id,
+        fullName: member.fullName,
+        email: member.email,
+        avatar: member.avatar || '',
+      },
       message: `${userName} đã thêm ${memberName} vào card "${card.title}"`,
     });
 
@@ -1182,13 +1189,13 @@ const toggleCardCompletion = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy thẻ!" });
     }
 
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       return res.status(404).json({ message: "Board không tồn tại!" });
     }
 
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       return res.status(403).json({ message: "Bạn không có quyền cập nhật thẻ!" });
@@ -1229,18 +1236,19 @@ const toggleCardCompletion = async (req, res, io) => {
     return res.status(500).json({ message: "Lỗi khi cập nhật trạng thái", error: err.message });
   }
 };
+
+// Xóa thành viên khỏi thẻ
 const removeMemberFromCard = async (req, res, io) => {
   const { cardId, memberId } = req.params;
 
   try {
-    // Kiểm tra user
+    console.log("Removing member from card:", { cardId, memberId, user: req.user?.email });
+
     if (!req.user || !req.user._id) {
       console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
-    console.log("User authenticated:", req.user._id.toString());
 
-    // Kiểm tra cardId và memberId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
       console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
@@ -1249,111 +1257,83 @@ const removeMemberFromCard = async (req, res, io) => {
       console.log("Invalid memberId:", memberId);
       return res.status(400).json({ message: "Member ID không hợp lệ!" });
     }
-    console.log("Validated IDs:", { cardId, memberId });
 
-    // Tìm card
-    console.log("Finding card:", cardId);
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
-    console.log("Card found:", { cardId, title: card.title });
 
-    // Tìm board
-    console.log("Finding board:", card.board);
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board?.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
-    console.log("Board found:", { boardId: board._id.toString(), title: board.title });
 
-    // Kiểm tra xem user có phải là owner của board không
     const isOwner = board.owner && board.owner.toString() === req.user._id.toString();
     if (!isOwner) {
       console.log("Permission denied: User is not board owner:", req.user._id.toString());
       return res.status(403).json({ message: "Chỉ chủ phòng mới có quyền xóa thành viên khỏi card!" });
     }
-    console.log("User is board owner:", req.user._id.toString());
 
-    // Kiểm tra và validate card.members
-    console.log("Current card.members:", card.members.map(m => m?.toString()));
     if (!Array.isArray(card.members)) {
       console.error("card.members is not an array:", card.members);
       return res.status(500).json({ message: "Dữ liệu card.members không hợp lệ!" });
     }
 
-    // Kiểm tra xem memberId có trong card.members không
     const memberExists = card.members.some((m) => m && m.toString() === memberId);
     if (!memberExists) {
       console.log("Member not found in card:", memberId);
       return res.status(404).json({ message: "Thành viên không tồn tại trong card!" });
     }
 
-    // Xóa member khỏi card, bỏ qua các giá trị không hợp lệ
-    console.log("Removing member from card:", memberId);
-    card.members = card.members.filter((m) => {
-      if (!m || !mongoose.Types.ObjectId.isValid(m)) {
-        console.warn("Invalid member in card.members:", m);
-        return false;
-      }
-      return m.toString() !== memberId;
-    });
-    console.log("Updated card.members:", card.members.map(m => m.toString()));
-
-    // Lưu card
-    console.log("Saving card");
+    card.members = card.members.filter((m) => m && m.toString() !== memberId);
     await card.save();
 
-    // Tạo activity
-    console.log("Creating activity");
+    const member = await User.findById(memberId);
     const userName = req.user.fullName || req.user.email || "Unknown User";
+    const memberName = member ? (member.fullName || member.email || "Unknown User") : "Unknown User";
+
     const activity = new Activity({
       user: req.user._id,
       action: "member_removed_from_card",
       target: card._id,
       targetModel: "Card",
-      details: `User ${userName} removed a member from card "${card.title}"`,
+      details: `User ${userName} removed ${memberName} from card "${card.title}"`,
     });
     await activity.save();
-    console.log("Activity created:", activity._id.toString());
-
-    // Cập nhật activities cho card và board
-    console.log("Updating activities");
     card.activities = card.activities || [];
     card.activities.push(activity._id);
     board.activities = board.activities || [];
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
-    console.log("Activities updated");
 
-    // Gửi thông báo cho member bị xóa
-    console.log("Sending notification to removed member:", memberId);
-    const notification = new Notification({
-      user: memberId,
-      message: `Bạn đã bị xóa khỏi card "${card.title}" bởi ${userName}`,
-      type: "activity",
-      target: card._id,
-      targetModel: "Card",
-    });
-    await notification.save();
-    io.to(memberId.toString()).emit("new-notification", notification);
-    console.log("Notification sent");
+    if (member) {
+      const notification = new Notification({
+        user: memberId,
+        message: `Bạn đã bị xóa khỏi card "${card.title}" bởi ${userName}`,
+        type: "activity",
+        target: card._id,
+        targetModel: "Card",
+      });
+      await notification.save();
+      io.to(memberId.toString()).emit("new-notification", notification);
+    }
 
-    // Phát sự kiện Socket.IO
-    console.log("Emitting member-removed-from-card event");
+    const updatedCard = await Card.findById(cardId)
+      .populate("members", "email fullName avatar")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
+      .populate({ path: "activities", match: { isDeleted: false } });
+
     io.to(card.board.toString()).emit("member-removed-from-card", {
       cardId,
       memberId,
-      message: `${userName} đã xóa một thành viên khỏi card "${card.title}"`,
+      message: `${userName} đã xóa ${memberName} khỏi card "${card.title}"`,
     });
 
     console.log("Member removed from card successfully:", { cardId, memberId });
 
-    // Trả về danh sách members cập nhật với populate
-    const updatedCard = await Card.findById(cardId)
-      .populate("members", "email fullName avatar");
     res.status(200).json(updatedCard.members);
   } catch (err) {
     console.error("Error in removeMemberFromCard:", {
@@ -1362,11 +1342,12 @@ const removeMemberFromCard = async (req, res, io) => {
       cardId,
       memberId,
       userId: req.user?._id?.toString(),
-      cardMembers: card?.members?.map(m => m?.toString()) || "unknown",
+      cardMembers: card?.members?.map((m) => m?.toString()) || "unknown",
     });
     res.status(500).json({ message: "Lỗi khi xóa thành viên khỏi card", error: err.message });
   }
 };
+
 // Sửa tiêu đề checklist
 const editChecklist = async (req, res, io) => {
   const { cardId, checklistIndex } = req.params;
@@ -1375,65 +1356,55 @@ const editChecklist = async (req, res, io) => {
   try {
     console.log("Editing checklist:", { cardId, checklistIndex, title, user: req.user?.email });
 
-    // Kiểm tra user
     if (!req.user || !req.user._id) {
       console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    // Kiểm tra cardId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
       console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
-    // Kiểm tra và chuyển đổi index
     const index = parseInt(checklistIndex);
     if (isNaN(index) || index < 0) {
       console.log("Invalid checklistIndex:", checklistIndex);
       return res.status(400).json({ message: "Checklist index không hợp lệ!" });
     }
 
-    // Kiểm tra title
     if (!title || typeof title !== "string") {
       console.log("Invalid title:", title);
       return res.status(400).json({ message: "Tiêu đề checklist là bắt buộc và phải là chuỗi!" });
     }
 
-    // Tìm card
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    // Tìm board
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
-    // Kiểm tra quyền thành viên
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền sửa checklist này!" });
     }
 
-    // Kiểm tra checklist
     if (!card.checklists[index]) {
       console.log("Checklist not found:", index);
       return res.status(404).json({ message: "Không tìm thấy checklist!" });
     }
 
-    // Cập nhật tiêu đề checklist
     card.checklists[index].title = title;
     await card.save();
 
-    // Tạo activity
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const activity = new Activity({
       user: req.user._id,
@@ -1447,15 +1418,19 @@ const editChecklist = async (req, res, io) => {
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
-    // Gửi thông báo qua Socket.IO
     io.to(card.board.toString()).emit("checklist-updated", {
       cardId,
-      checklistIndex: index,
+      checklistId: card.checklists[index]._id,
       title,
+      checklist: {
+        _id: card.checklists[index]._id,
+        title: card.checklists[index].title,
+        items: card.checklists[index].items,
+      },
       message: `${userName} đã cập nhật tiêu đề checklist thành "${title}" trong card "${card.title}"`,
     });
 
-    console.log("Checklist updated successfully:", { cardId, checklistIndex, title });
+    console.log("Checklist updated successfully:", { cardId, checklistId: card.checklists[index]._id, title });
 
     res.status(200).json(card.checklists);
   } catch (err) {
@@ -1471,62 +1446,53 @@ const deleteChecklist = async (req, res, io) => {
   try {
     console.log("Deleting checklist:", { cardId, checklistIndex, user: req.user?.email });
 
-    // Kiểm tra user
     if (!req.user || !req.user._id) {
       console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    // Kiểm tra cardId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
       console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
-    // Kiểm tra và chuyển đổi index
     const index = parseInt(checklistIndex);
     if (isNaN(index) || index < 0) {
       console.log("Invalid checklistIndex:", checklistIndex);
       return res.status(400).json({ message: "Checklist index không hợp lệ!" });
     }
 
-    // Tìm card
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    // Tìm board
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
-    // Kiểm tra quyền thành viên
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền xóa checklist này!" });
     }
 
-    // Kiểm tra checklist
     if (!card.checklists[index]) {
       console.log("Checklist not found:", index);
       return res.status(404).json({ message: "Không tìm thấy checklist!" });
     }
 
-    // Lưu tiêu đề checklist để ghi activity
     const checklistTitle = card.checklists[index].title;
+    const checklistId = card.checklists[index]._id;
 
-    // Xóa checklist
     card.checklists.splice(index, 1);
     await card.save();
 
-    // Tạo activity
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const activity = new Activity({
       user: req.user._id,
@@ -1540,14 +1506,13 @@ const deleteChecklist = async (req, res, io) => {
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
-    // Gửi thông báo qua Socket.IO
     io.to(card.board.toString()).emit("checklist-deleted", {
       cardId,
-      checklistIndex: index,
+      checklistId,
       message: `${userName} đã xóa checklist "${checklistTitle}" trong card "${card.title}"`,
     });
 
-    console.log("Checklist deleted successfully:", { cardId, checklistIndex });
+    console.log("Checklist deleted successfully:", { cardId, checklistId });
 
     res.status(200).json(card.checklists);
   } catch (err) {
@@ -1570,19 +1535,16 @@ const editChecklistItem = async (req, res, io) => {
       user: req.user?.email,
     });
 
-    // Kiểm tra user
     if (!req.user || !req.user._id) {
       console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    // Kiểm tra cardId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
       console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
-    // Kiểm tra và chuyển đổi index
     const checklistIdx = parseInt(checklistIndex);
     const itemIdx = parseInt(itemIndex);
     if (isNaN(checklistIdx) || checklistIdx < 0 || isNaN(itemIdx) || itemIdx < 0) {
@@ -1590,46 +1552,39 @@ const editChecklistItem = async (req, res, io) => {
       return res.status(400).json({ message: "Checklist index hoặc item index không hợp lệ!" });
     }
 
-    // Kiểm tra text
     if (!text || typeof text !== "string") {
       console.log("Invalid text:", text);
       return res.status(400).json({ message: "Nội dung item là bắt buộc và phải là chuỗi!" });
     }
 
-    // Tìm card
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    // Tìm board
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
-    // Kiểm tra quyền thành viên
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền sửa checklist item này!" });
     }
 
-    // Kiểm tra checklist và item
     if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
       console.log("Checklist or item not found:", { checklistIdx, itemIdx });
       return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
     }
 
-    // Cập nhật nội dung item
     card.checklists[checklistIdx].items[itemIdx].text = text;
     await card.save();
 
-    // Tạo activity
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const activity = new Activity({
       user: req.user._id,
@@ -1643,18 +1598,22 @@ const editChecklistItem = async (req, res, io) => {
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
-    // Gửi thông báo qua Socket.IO
     io.to(card.board.toString()).emit("checklist-item-updated", {
       cardId,
-      checklistIndex: checklistIdx,
+      checklistId: card.checklists[checklistIdx]._id,
       itemIndex: itemIdx,
-      text,
+      item: card.checklists[checklistIdx].items[itemIdx],
+      checklist: {
+        _id: card.checklists[checklistIdx]._id,
+        title: card.checklists[checklistIdx].title,
+        items: card.checklists[checklistIdx].items,
+      },
       message: `${userName} đã cập nhật item "${text}" trong checklist của card "${card.title}"`,
     });
 
     console.log("Checklist item updated successfully:", {
       cardId,
-      checklistIndex: checklistIdx,
+      checklistId: card.checklists[checklistIdx]._id,
       itemIndex: itemIdx,
       text,
     });
@@ -1678,19 +1637,16 @@ const deleteChecklistItem = async (req, res, io) => {
       user: req.user?.email,
     });
 
-    // Kiểm tra user
     if (!req.user || !req.user._id) {
       console.log("No user found in req.user");
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    // Kiểm tra cardId
     if (!mongoose.Types.ObjectId.isValid(cardId)) {
       console.log("Invalid cardId:", cardId);
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
-    // Kiểm tra và chuyển đổi index
     const checklistIdx = parseInt(checklistIndex);
     const itemIdx = parseInt(itemIndex);
     if (isNaN(checklistIdx) || checklistIdx < 0 || isNaN(itemIdx) || itemIdx < 0) {
@@ -1698,43 +1654,37 @@ const deleteChecklistItem = async (req, res, io) => {
       return res.status(400).json({ message: "Checklist index hoặc item index không hợp lệ!" });
     }
 
-    // Tìm card
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
-    // Tìm board
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
-    // Kiểm tra quyền thành viên
     const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+      (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
     if (!isMember) {
       console.log("Permission denied for user:", req.user._id.toString());
       return res.status(403).json({ message: "Bạn không có quyền xóa checklist item này!" });
     }
 
-    // Kiểm tra checklist và item
     if (!card.checklists[checklistIdx] || !card.checklists[checklistIdx].items[itemIdx]) {
       console.log("Checklist or item not found:", { checklistIdx, itemIdx });
       return res.status(404).json({ message: "Không tìm thấy checklist hoặc item!" });
     }
 
-    // Lưu nội dung item để ghi activity
     const itemText = card.checklists[checklistIdx].items[itemIdx].text;
+    const checklistId = card.checklists[checklistIdx]._id;
 
-    // Xóa item
     card.checklists[checklistIdx].items.splice(itemIdx, 1);
     await card.save();
 
-    // Tạo activity
     const userName = req.user.fullName || req.user.email || "Unknown User";
     const activity = new Activity({
       user: req.user._id,
@@ -1748,17 +1698,21 @@ const deleteChecklistItem = async (req, res, io) => {
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
-    // Gửi thông báo qua Socket.IO
     io.to(card.board.toString()).emit("checklist-item-deleted", {
       cardId,
-      checklistIndex: checklistIdx,
+      checklistId,
       itemIndex: itemIdx,
+      checklist: {
+        _id: card.checklists[checklistIdx]._id,
+        title: card.checklists[checklistIdx].title,
+        items: card.checklists[checklistIdx].items,
+      },
       message: `${userName} đã xóa item "${itemText}" khỏi checklist trong card "${card.title}"`,
     });
 
     console.log("Checklist item deleted successfully:", {
       cardId,
-      checklistIndex: checklistIdx,
+      checklistId,
       itemIndex: itemIdx,
     });
 
@@ -1768,8 +1722,57 @@ const deleteChecklistItem = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi khi xóa checklist item", error: err.message });
   }
 };
+const getCardById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    console.log("Fetching card with ID:", id);
+
+    if (!req.user || !req.user._id) {
+      console.log("No user found in req.user");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.log("Invalid cardId:", id);
+      return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    }
+
+    const card = await Card.findOne({ _id: id, isDeleted: false })
+      .populate("members", "email fullName avatar")
+      .populate("comments.user", "email fullName avatar")
+      .populate("notes.createdBy", "email fullName avatar")
+      .populate({ path: "activities", match: { isDeleted: false } });
+
+    if (!card) {
+      console.log("Card not found or deleted:", id);
+      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
+    }
+
+    const board = await Board.findOne({ _id: card.board, isDeleted: false });
+    if (!board) {
+      console.log("Board not found or deleted:", card.board.toString());
+      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
+    }
+
+    const isMember = board.members.some(
+      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
+    );
+    if (!isMember) {
+      console.log("Permission denied for user:", req.user._id.toString());
+      return res.status(403).json({ message: "Bạn không có quyền truy cập thẻ này!" });
+    }
+
+    console.log("Card found:", { id, title: card.title });
+
+    return res.status(200).json(card);
+  } catch (err) {
+    console.error("Error in getCardById:", err.message, err.stack);
+    return res.status(500).json({ message: "Lỗi khi lấy thông tin thẻ", error: err.message });
+  }
+};
 module.exports = {
+  getCardById,
   createCard,
   getCardsByList,
   updateCard,
@@ -1784,7 +1787,7 @@ module.exports = {
   toggleCardCompletion,
   removeMemberFromCard,
   editChecklist,
-  deleteChecklist, 
-  editChecklistItem, 
-  deleteChecklistItem, 
+  deleteChecklist,
+  editChecklistItem,
+  deleteChecklistItem,
 };

@@ -1,5 +1,6 @@
 const express = require("express");
 const {
+  getCardById,
   createCard,
   getCardsByList,
   updateCard,
@@ -1064,7 +1065,40 @@ module.exports = (io) => {
     ),
     (req, res) => removeMemberFromCard(req, res, io)
   );
-
+/**
+ * @swagger
+ * /api/cards/{id}:
+ *   get:
+ *     summary: Lấy thông tin chi tiết thẻ
+ *     tags: [Cards]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của thẻ (phải là ObjectId hợp lệ)
+ *     responses:
+ *       200:
+ *         description: Thông tin chi tiết thẻ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Card'
+ *       400:
+ *         description: Card ID không hợp lệ
+ *       401:
+ *         description: Không có token hoặc token không hợp lệ
+ *       403:
+ *         description: Không có quyền truy cập thẻ
+ *       404:
+ *         description: Không tìm thấy thẻ hoặc board
+ *       500:
+ *         description: Lỗi server
+ */
+router.get("/:id", authMiddleware, getCardById);
   /**
    * @swagger
    * components:
