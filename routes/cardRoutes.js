@@ -5,20 +5,22 @@ const {
   getCardsByList,
   updateCard,
   deleteCard,
-  addComment,
-  addNote,
-  addChecklist,
-  addChecklistItem,
-  toggleChecklistItem,
   moveCard,
   addMember,
   toggleCardCompletion,
   removeMemberFromCard,
+} = require("../controllers/cardController");
+const { addComment,hideComment } = require("../controllers/commentController");
+const { addNote,hideNote } = require("../controllers/noteController");
+const {
+  addChecklist,
+  addChecklistItem,
+  toggleChecklistItem,
   editChecklist,
   deleteChecklist,
   editChecklistItem,
   deleteChecklistItem,
-} = require("../controllers/cardController");
+} = require("../controllers/checklistController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const activityMiddleware = require("../middlewares/activityMiddleware");
 const notificationMiddleware = require("../middlewares/notificationMiddleware");
@@ -131,6 +133,41 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.get("/list/:listId", authMiddleware, getCardsByList);
+
+  /**
+   * @swagger
+   * /api/cards/{id}:
+   *   get:
+   *     summary: Lấy thông tin chi tiết thẻ
+   *     tags: [Cards]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của thẻ (phải là ObjectId hợp lệ)
+   *     responses:
+   *       200:
+   *         description: Thông tin chi tiết thẻ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Card'
+   *       400:
+   *         description: Card ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền truy cập thẻ
+   *       404:
+   *         description: Không tìm thấy thẻ hoặc board
+   *       500:
+   *         description: Lỗi server
+   */
+  router.get("/:id", authMiddleware, getCardById);
 
   /**
    * @swagger
@@ -485,9 +522,9 @@ module.exports = (io) => {
     (req, res) => addChecklist(req, res, io)
   );
 
-  /**
+ /**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}:
+   * /api/cards/{cardId}/checklists/{checklistId}:
    *   put:
    *     summary: Sửa tiêu đề checklist
    *     tags: [Cards]
@@ -501,11 +538,11 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của thẻ (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *     requestBody:
    *       required: true
    *       content:
@@ -528,7 +565,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Thiếu title, card ID, hoặc checklist index không hợp lệ
+   *         description: Thiếu title hoặc ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -539,7 +576,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.put(
-    "/:cardId/checklists/:checklistIndex",
+    "/:cardId/checklists/:checklistId",
     authMiddleware,
     activityMiddleware(
       "checklist_updated",
@@ -554,9 +591,9 @@ module.exports = (io) => {
     (req, res) => editChecklist(req, res, io)
   );
 
-  /**
+ /**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}:
+   * /api/cards/{cardId}/checklists/{checklistId}:
    *   delete:
    *     summary: Xóa checklist
    *     tags: [Cards]
@@ -570,11 +607,11 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của thẻ (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *     responses:
    *       200:
    *         description: Xóa checklist thành công
@@ -585,7 +622,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Card ID hoặc checklist index không hợp lệ
+   *         description: ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -596,7 +633,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.delete(
-    "/:cardId/checklists/:checklistIndex",
+    "/:cardId/checklists/:checklistId",
     authMiddleware,
     activityMiddleware(
       "checklist_deleted",
@@ -611,9 +648,9 @@ module.exports = (io) => {
     (req, res) => deleteChecklist(req, res, io)
   );
 
-  /**
+ /**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}/items:
+   * /api/cards/{cardId}/checklists/{checklistId}/items:
    *   post:
    *     summary: Thêm item vào checklist của thẻ
    *     tags: [Cards]
@@ -627,11 +664,11 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của card (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *     requestBody:
    *       required: true
    *       content:
@@ -654,7 +691,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Thiếu text, card ID, hoặc checklist index không hợp lệ
+   *         description: Thiếu text hoặc ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -665,7 +702,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.post(
-    "/:cardId/checklists/:checklistIndex/items",
+    "/:cardId/checklists/:checklistId/items",
     authMiddleware,
     activityMiddleware("checklist_item_added", "Card", (req) => `User ${req.user.fullName} added a checklist item`),
     notificationMiddleware(
@@ -676,9 +713,9 @@ module.exports = (io) => {
     (req, res) => addChecklistItem(req, res, io)
   );
 
-  /**
+ /**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}/items/{itemIndex}:
+   * /api/cards/{cardId}/checklists/{checklistId}/items/{itemId}:
    *   put:
    *     summary: Sửa nội dung checklist item
    *     tags: [Cards]
@@ -692,17 +729,17 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của thẻ (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: itemIndex
+   *         name: itemId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của item trong mảng items của checklist
+   *           type: string
+   *         description: ID của item (phải là ObjectId hợp lệ)
    *     requestBody:
    *       required: true
    *       content:
@@ -725,7 +762,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Thiếu text, card ID, checklist index, hoặc item index không hợp lệ
+   *         description: Thiếu text hoặc ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -736,7 +773,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.put(
-    "/:cardId/checklists/:checklistIndex/items/:itemIndex",
+    "/:cardId/checklists/:checklistId/items/:itemId",
     authMiddleware,
     activityMiddleware(
       "checklist_item_updated",
@@ -751,9 +788,9 @@ module.exports = (io) => {
     (req, res) => editChecklistItem(req, res, io)
   );
 
-  /**
+/**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}/items/{itemIndex}:
+   * /api/cards/{cardId}/checklists/{checklistId}/items/{itemId}:
    *   delete:
    *     summary: Xóa checklist item
    *     tags: [Cards]
@@ -767,17 +804,17 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của thẻ (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: itemIndex
+   *         name: itemId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của item trong mảng items của checklist
+   *           type: string
+   *         description: ID của item (phải là ObjectId hợp lệ)
    *     responses:
    *       200:
    *         description: Xóa checklist item thành công
@@ -788,7 +825,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Card ID, checklist index, hoặc item index không hợp lệ
+   *         description: ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -799,7 +836,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.delete(
-    "/:cardId/checklists/:checklistIndex/items/:itemIndex",
+    "/:cardId/checklists/:checklistId/items/:itemId",
     authMiddleware,
     activityMiddleware(
       "checklist_item_deleted",
@@ -816,7 +853,7 @@ module.exports = (io) => {
 
   /**
    * @swagger
-   * /api/cards/{cardId}/checklists/{checklistIndex}/items/{itemIndex}/toggle:
+   * /api/cards/{cardId}/checklists/{checklistId}/items/{itemId}/toggle:
    *   put:
    *     summary: Đánh dấu hoàn thành/không hoàn thành item trong checklist
    *     tags: [Cards]
@@ -830,17 +867,17 @@ module.exports = (io) => {
    *           type: string
    *         description: ID của card (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: checklistIndex
+   *         name: checklistId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của checklist trong mảng checklists
+   *           type: string
+   *         description: ID của checklist (phải là ObjectId hợp lệ)
    *       - in: path
-   *         name: itemIndex
+   *         name: itemId
    *         required: true
    *         schema:
-   *           type: integer
-   *         description: Index của item trong mảng items của checklist
+   *           type: string
+   *         description: ID của item (phải là ObjectId hợp lệ)
    *     responses:
    *       200:
    *         description: Cập nhật trạng thái item thành công
@@ -851,7 +888,7 @@ module.exports = (io) => {
    *               items:
    *                 $ref: '#/components/schemas/Checklist'
    *       400:
-   *         description: Card ID, checklist index, hoặc item index không hợp lệ
+   *         description: ID không hợp lệ
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -862,7 +899,7 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.put(
-    "/:cardId/checklists/:checklistIndex/items/:itemIndex/toggle",
+    "/:cardId/checklists/:checklistId/items/:itemId/toggle",
     authMiddleware,
     activityMiddleware("checklist_item_toggled", "Card", (req) => `User ${req.user.fullName} toggled a checklist item`),
     notificationMiddleware(
@@ -1067,38 +1104,97 @@ module.exports = (io) => {
   );
 /**
  * @swagger
- * /api/cards/{id}:
- *   get:
- *     summary: Lấy thông tin chi tiết thẻ
+ * /api/cards/{cardId}/comments/{commentId}:
+ *   delete:
+ *     summary: Thu hồi bình luận
  *     tags: [Cards]
  *     security:
  *       - BearerAuth: []
  *     parameters:
  *       - in: path
- *         name: id
+ *         name: cardId
  *         required: true
  *         schema:
  *           type: string
  *         description: ID của thẻ (phải là ObjectId hợp lệ)
+ *       - in: path
+ *         name: commentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của bình luận (phải là ObjectId hợp lệ)
  *     responses:
  *       200:
- *         description: Thông tin chi tiết thẻ
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Card'
+ *         description: Thu hồi bình luận thành công
  *       400:
- *         description: Card ID không hợp lệ
+ *         description: ID không hợp lệ
  *       401:
  *         description: Không có token hoặc token không hợp lệ
  *       403:
- *         description: Không có quyền truy cập thẻ
+ *         description: Không có quyền thu hồi bình luận
  *       404:
- *         description: Không tìm thấy thẻ hoặc board
+ *         description: Không tìm thấy thẻ hoặc bình luận
  *       500:
  *         description: Lỗi server
  */
-router.get("/:id", authMiddleware, getCardById);
+router.delete(
+  "/:cardId/comments/:commentId",
+  authMiddleware,
+  activityMiddleware("comment_hidden", "Card", (req) => `User ${req.user.fullName} hid a comment`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã thu hồi một bình luận`,
+    "activity",
+    "Card"
+  ),
+  (req, res) => hideComment(req, res, io)
+);
+
+/**
+ * @swagger
+ * /api/cards/{cardId}/notes/{noteId}:
+ *   delete:
+ *     summary: Thu hồi ghi chú
+ *     tags: [Cards]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: cardId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của thẻ (phải là ObjectId hợp lệ)
+ *       - in: path
+ *         name: noteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của ghi chú (phải là ObjectId hợp lệ)
+ *     responses:
+ *       200:
+ *         description: Thu hồi ghi chú thành công
+ *       400:
+ *         description: ID không hợp lệ
+ *       401:
+ *         description: Không có token hoặc token không hợp lệ
+ *       403:
+ *         description: Không có quyền thu hồi ghi chú
+ *       404:
+ *         description: Không tìm thấy thẻ hoặc ghi chú
+ *       500:
+ *         description: Lỗi server
+ */
+router.delete(
+  "/:cardId/notes/:noteId",
+  authMiddleware,
+  activityMiddleware("note_hidden", "Card", (req) => `User ${req.user.fullName} hid a note`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã thu hồi một ghi chú`,
+    "activity",
+    "Card"
+  ),
+  (req, res) => hideNote(req, res, io)
+);
   /**
    * @swagger
    * components:

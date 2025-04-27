@@ -1,4 +1,7 @@
 const mongoose = require("mongoose");
+const checklistSchema = require("./Checklist");
+const commentSchema = require("./Comment");
+const noteSchema = require("./Note");
 
 const cardSchema = new mongoose.Schema(
   {
@@ -11,33 +14,11 @@ const cardSchema = new mongoose.Schema(
     dueDate: { type: Date },
     completed: { type: Boolean, default: false },
     position: { type: Number, default: 0 },
-    checklists: [
-      {
-        title: String,
-        items: [
-          {
-            text: String,
-            completed: { type: Boolean, default: false },
-          },
-        ],
-      },
-    ],
-    comments: [
-      {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-        text: String,
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
-    notes: [
-      {
-        content: String,
-        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
+    checklists: [checklistSchema],
+    comments: [commentSchema],
+    notes: [noteSchema],
     activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity", default: [] }],
-    isDeleted: { type: Boolean, default: false },
+    isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
