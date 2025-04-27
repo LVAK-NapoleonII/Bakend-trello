@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema({
   otp: { type: String },
   otpExpires: { type: Date },
   avatar: { type: String },
+  isOnline: { type: Boolean, default: false },    
   notifications: [{ type: mongoose.Schema.Types.ObjectId, ref: "Notification" }],
 });
 userSchema.pre("save", async function (next) {

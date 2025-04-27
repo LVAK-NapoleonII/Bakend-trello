@@ -5,7 +5,16 @@ const Workspace = require("../models/Workspace");
 const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
 const Card = require("../models/Card");
-const { io } = require("../server");
+const nodemailer = require("nodemailer");
+
+const transporter = nodemailer.createTransport({
+  service: "Gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 // Tạo bảng
 const createBoard = async (req, res, io) => {
   try {
@@ -64,8 +73,8 @@ const createBoard = async (req, res, io) => {
     await Promise.all([board.save(), workspaceDoc.save()]);
 
     const populatedBoard = await Board.findById(board._id)
-      .populate("members.user", "email avatar fullName")
-      .populate("owner", "email fullName _id")
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline")
       .populate("workspace", "name");
 
     // Phát sự kiện đến tất cả thành viên workspace
@@ -82,6 +91,7 @@ const createBoard = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi server", error: err.message });
   }
 };
+
 // Lấy danh sách board của user
 const getUserBoards = async (req, res) => {
   try {
@@ -100,8 +110,8 @@ const getUserBoards = async (req, res) => {
       isDeleted: false,
     })
       .populate("workspace", "name")
-      .populate("owner", "email fullName")
-      .populate("members.user", "email fullName avatar");
+      .populate("owner", "email fullName isOnline")
+      .populate("members.user", "email fullName avatar isOnline");
 
     console.log("Found boards:", boards.map(b => ({
       id: b._id.toString(),
@@ -129,13 +139,13 @@ const getBoardById = async (req, res) => {
     const board = await Board.findOne({ _id: req.params.id, isDeleted: false })
       .populate({
         path: "members.user",
-        select: "email avatar fullName",
+        select: "email avatar fullName isOnline",
       })
       .populate({
         path: "invitedUsers.user",
-        select: "email avatar fullName",
+        select: "email avatar fullName isOnline",
       })
-      .populate("owner", "email fullName _id")
+      .populate("owner", "email fullName _id isOnline")
       .populate("workspace", "name");
 
     if (!board) {
@@ -190,8 +200,8 @@ const updateBoard = async (req, res, io) => {
       { title, description, background, visibility },
       { new: true }
     )
-      .populate("members.user", "email avatar fullName")
-      .populate("owner", "email fullName _id")
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline")
       .populate("workspace", "name");
 
     const activity = new Activity({
@@ -421,7 +431,7 @@ const inviteMember = async (req, res, io) => {
         };
         board.invitedUsers.push(tempInvite);
 
-        const inviteLink = `http://localhost:3000/invite/accept?boardId=${boardId}&email=${encodeURIComponent(email)}`;
+        const inviteLink = `http://localhost:5173/invite/accept?boardId=${boardId}&email=${encodeURIComponent(email)}`;
         await transporter.sendMail({
           from: `"Trello Clone" <${process.env.EMAIL_USER}>`,
           to: email,
@@ -494,13 +504,13 @@ const inviteMember = async (req, res, io) => {
       await Promise.all([board.save(), workspace.save(), user.save()]);
 
       const updatedBoard = await Board.findById(boardId)
-        .populate("members.user", "email avatar fullName")
-        .populate("invitedUsers.user", "email avatar fullName")
-        .populate("owner", "email fullName _id");
+        .populate("members.user", "email avatar fullName isOnline")
+        .populate("invitedUsers.user", "email avatar fullName isOnline")
+        .populate("owner", "email fullName _id isOnline");
 
       io.to(boardId).emit("member-invited", {
         board: updatedBoard,
-        invitedUser: { _id: user._id, fullName: user.fullName, email: user.email },
+        invitedUser: { _id: user._id, fullName: user.fullName, email: user.email, isOnline: user.isOnline },
       });
       io.to(user._id.toString()).emit("new-notification", notification);
 
@@ -511,13 +521,13 @@ const inviteMember = async (req, res, io) => {
     } else {
       await board.save();
       const updatedBoard = await Board.findById(boardId)
-        .populate("members.user", "email avatar fullName")
-        .populate("invitedUsers.user", "email avatar fullName")
-        .populate("owner", "email fullName _id");
+        .populate("members.user", "email avatar fullName isOnline")
+        .populate("invitedUsers.user", "email avatar fullName isOnline")
+        .populate("owner", "email fullName _id isOnline");
 
       io.to(boardId).emit("member-invited", {
         board: updatedBoard,
-        invitedUser: { _id: user._id, fullName: user.fullName, email: user.email },
+        invitedUser: { _id: user._id, fullName: user.fullName, email: user.email, isOnline: user.isOnline },
       });
 
       res.status(200).json({
@@ -530,6 +540,7 @@ const inviteMember = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi server khi mời thành viên!", error: err.message });
   }
 };
+
 // Xóa thành viên khỏi bảng
 const removeMember = async (req, res, io) => {
   try {
@@ -558,7 +569,6 @@ const removeMember = async (req, res, io) => {
     );
     if (matchingMembers.length > 1) {
       console.warn(`Duplicate members found for user ${userId} in board ${boardId}`);
-      // Chỉ giữ bản ghi có isActive: false hoặc bản ghi đầu tiên
       board.members = board.members.filter(
         (m) => m.user.toString() !== userId
       );
@@ -628,8 +638,8 @@ const removeMember = async (req, res, io) => {
     await notification.save();
 
     const updatedBoard = await Board.findById(boardId)
-      .populate("members.user", "email avatar fullName")
-      .populate("owner", "email fullName _id");
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline");
 
     io.to(boardId).emit("member-deactivated", {
       board: updatedBoard,
@@ -684,7 +694,7 @@ const getBoardActivities = async (req, res) => {
     }
 
     const activities = await Activity.find({ target: boardId, targetModel: "Board" })
-      .populate("user", "email fullName")
+      .populate("user", "email fullName isOnline")
       .sort({ createdAt: -1 })
       .limit(50);
 
@@ -784,8 +794,8 @@ const leaveBoard = async (req, res, io) => {
     await notification.save();
 
     const updatedBoard = await Board.findById(boardId)
-      .populate("members.user", "email avatar fullName")
-      .populate("owner", "email fullName _id");
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline");
 
     // Phát sự kiện member-deactivated với cardIds
     io.to(boardId).emit("member-deactivated", {
@@ -815,6 +825,7 @@ const leaveBoard = async (req, res, io) => {
     res.status(500).json({ message: "Lỗi server khi rời bảng!", error: err.message });
   }
 };
+
 // Chuyển quyền sở hữu bảng
 const transferOwnership = async (req, res, io) => {
   try {
@@ -876,9 +887,9 @@ const transferOwnership = async (req, res, io) => {
     await newOwner.save();
 
     const updatedBoard = await Board.findById(boardId)
-      .populate("members.user", "email avatar fullName")
-      .populate("invitedUsers.user", "email avatar fullName")
-      .populate("owner", "email fullName _id");
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("invitedUsers.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline");
 
     io.to(boardId).emit("board-updated", {
       board: updatedBoard,

@@ -15,6 +15,7 @@ const cardRoutes = require("./routes/cardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const activityRoutes = require("./routes/activityRoutes");
 const Notification = require("./models/Notification");
+const User = require("./models/User"); // Import User model
 const jwt = require("jsonwebtoken");
 
 const app = express();
@@ -54,7 +55,6 @@ io.use(async (socket, next) => {
       return next(new Error("Authentication error: No token provided"));
     }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    // Điều chỉnh để phù hợp với cấu trúc token
     socket.user = decoded.user || { _id: decoded.id }; // Hỗ trợ cả { user: { _id } } và { id }
     console.log("Socket.IO: Authenticated user:", socket.user._id);
     next();
@@ -64,9 +64,24 @@ io.use(async (socket, next) => {
   }
 });
 
+// Map để lưu userId và socketId
+const connectedUsers = new Map();
+
 // Socket.IO
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log(`Server: User connected: ${socket.id}, User ID: ${socket.user._id}`);
+
+  // Cập nhật trạng thái online
+  try {
+    await User.findByIdAndUpdate(socket.user._id, { isOnline: true });
+    connectedUsers.set(socket.user._id.toString(), socket.id);
+    io.emit("user-status-changed", {
+      userId: socket.user._id,
+      isOnline: true,
+    });
+  } catch (err) {
+    console.error("Socket.IO: Error updating user online status:", err.message);
+  }
 
   socket.on("join-user", (userId) => {
     if (userId !== socket.user._id.toString()) {
@@ -267,8 +282,18 @@ io.on("connection", (socket) => {
     io.to(cardId).emit("card-completion-toggled", { cardId, completed });
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log(`Server: User disconnected: ${socket.id}, User ID: ${socket.user._id}`);
+    try {
+      await User.findByIdAndUpdate(socket.user._id, { isOnline: false });
+      connectedUsers.delete(socket.user._id.toString());
+      io.emit("user-status-changed", {
+        userId: socket.user._id,
+        isOnline: false,
+      });
+    } catch (err) {
+      console.error("Socket.IO: Error updating user offline status:", err.message);
+    }
   });
 });
 

@@ -5,6 +5,7 @@ const {
   resetPassword,
   verifyOTP,
   login,
+  getProfile, 
   updateAvatar,
   refreshToken,
   logout,
@@ -15,9 +16,8 @@ const notificationMiddleware = require("../middlewares/notificationMiddleware");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const User = require("../models/User"); 
+const User = require("../models/User");
 const Board = require("../models/Board");
-const mongoose = require("mongoose");
 
 // Đảm bảo thư mục uploads tồn tại
 const uploadDir = path.join(__dirname, "../Uploads");
@@ -159,6 +159,26 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Đăng nhập thành công, trả về token
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 token:
+   *                   type: string
+   *                 user:
+   *                   type: object
+   *                   properties:
+   *                     _id:
+   *                       type: string
+   *                     fullName:
+   *                       type: string
+   *                     email:
+   *                       type: string
+   *                     avatar:
+   *                       type: string
+   *                     isOnline:
+   *                       type: boolean
    *       400:
    *         description: Sai email hoặc mật khẩu
    *       500:
@@ -181,54 +201,44 @@ module.exports = (io) => {
   router.post("/refresh-token", refreshToken);
 
   /**
- * @swagger
- * /api/auth/update-profile:
- *   put:
- *     summary: Cập nhật hồ sơ người dùng
- *     tags: [Auth]
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               fullName:
- *                 type: string
- *               bio:
- *                 type: string
- *     responses:
- *       200:
- *         description: Cập nhật hồ sơ thành công
- *       400:
- *         description: Thiếu thông tin
- *       401:
- *         description: Không có token hoặc token không hợp lệ
- *       500:
- *         description: Lỗi server
- */
-  router.get("/profile", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select("_id fullName email avatar");
-    if (!user) {
-      return res.status(404).json({ message: "Người dùng không tồn tại" });
-    }
-    res.json({
-      message: "Chào mừng bạn!",
-      user: {
-        _id: user._id,
-        email: user.email,
-        fullName: user.fullName,
-        avatar: user.avatar,
-      },
-    });
-  } catch (error) {
-    console.error("Profile: Error:", error.message);
-    res.status(500).json({ message: "Lỗi server" });
-  }
-});
+   * @swagger
+   * /api/auth/profile:
+   *   get:
+   *     summary: Lấy hồ sơ người dùng
+   *     tags: [Auth]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Hồ sơ người dùng
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                 user:
+   *                   type: object
+   *                   properties:
+   *                     _id:
+   *                       type: string
+   *                     email:
+   *                       type: string
+   *                     fullName:
+   *                       type: string
+   *                     avatar:
+   *                       type: string
+   *                     isOnline:
+   *                       type: boolean
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       404:
+   *         description: Người dùng không tồn tại
+   *       500:
+   *         description: Lỗi server
+   */
+  router.get("/profile", authMiddleware, getProfile);
 
   /**
    * @swagger
@@ -309,6 +319,26 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Cập nhật avatar thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                 user:
+   *                   type: object
+   *                   properties:
+   *                     _id:
+   *                       type: string
+   *                     email:
+   *                       type: string
+   *                     fullName:
+   *                       type: string
+   *                     avatar:
+   *                       type: string
+   *                     isOnline:
+   *                       type: boolean
    *       400:
    *         description: Thiếu file avatar
    *       401:
@@ -347,7 +377,7 @@ module.exports = (io) => {
    */
   router.post("/logout", authMiddleware, (req, res) => logout(req, res, io));
 
-/**
+  /**
    * @swagger
    * /api/auth/search:
    *   get:
@@ -390,7 +420,11 @@ module.exports = (io) => {
    *                         type: string
    *                       avatar:
    *                         type: string
+   *                       isOnline:
+   *                         type: boolean
    *                       isPastMember:
+   *                         type: boolean
+   *                       isInvited:
    *                         type: boolean
    *       400:
    *         description: Query không hợp lệ
@@ -400,48 +434,56 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.get("/search", authMiddleware, async (req, res) => {
-    try {
-      const { query, boardId } = req.query;
-      if (!query || query.trim().length < 1) {
-        return res.status(400).json({ message: "Query là bắt buộc!" });
-      }
-
-      const users = await User.find({
-        $or: [
-          { email: { $regex: query.trim(), $options: "i" } },
-          { fullName: { $regex: query.trim(), $options: "i" } },
-        ],
-      }).select("_id email fullName avatar");
-
-      let pastMembers = [];
-      let invitedUsers = [];
-      if (boardId && mongoose.Types.ObjectId.isValid(boardId)) {
-        const board = await Board.findById(boardId).select("members invitedUsers");
-        if (board) {
-          pastMembers = board.members
-            .filter((m) => m.user && !m.isActive)
-            .map((m) => m.user.toString());
-          invitedUsers = board.invitedUsers
-            .filter((i) => i.user && i.isActive)
-            .map((i) => i.user.toString());
-        }
-      }
-
-      const enrichedUsers = users.map((user) => ({
-        ...user.toObject(),
-        isPastMember: pastMembers.includes(user._id.toString()),
-        isInvited: invitedUsers.includes(user._id.toString()),
-      }));
-
-      res.status(200).json({ users: enrichedUsers });
-    } catch (err) {
-      console.error("Error in searchUsers:", err.message, err.stack);
-      res.status(500).json({
-        message: "Lỗi server khi tìm kiếm người dùng!",
-        error: err.message,
-      });
+  try {
+    const { query, boardId, onlyActiveMembers } = req.query;
+    if (!query && !onlyActiveMembers) {
+      return res.status(400).json({ message: "Query is required unless onlyActiveMembers is specified" });
     }
-  });
+
+    let users = [];
+
+    if (onlyActiveMembers && boardId) {
+      // Trả về các thành viên active của bảng
+      const board = await Board.findById(boardId).select("members");
+      if (!board) {
+        return res.status(404).json({ message: "Board not found" });
+      }
+      const activeMemberIds = board.members
+        .filter((m) => m.isActive)
+        .map((m) => m.user);
+      users = await User.find({ _id: { $in: activeMemberIds } }).select(
+        "_id fullName email avatar isOnline"
+      );
+    } else {
+      // Tìm kiếm người dùng theo query
+      users = await User.find({
+        $or: [
+          { email: { $regex: query || "", $options: "i" } },
+          { fullName: { $regex: query || "", $options: "i" } },
+        ],
+      }).select("_id fullName email avatar isOnline");
+
+      // Nếu có boardId, loại bỏ các thành viên active (dành cho các trường hợp khác, như mời thành viên mới)
+      if (boardId && !onlyActiveMembers) {
+        const board = await Board.findById(boardId).select("members");
+        if (!board) {
+          return res.status(404).json({ message: "Board not found" });
+        }
+        const activeMemberIds = board.members
+          .filter((m) => m.isActive)
+          .map((m) => m.user.toString());
+        users = users.filter(
+          (user) => !activeMemberIds.includes(user._id.toString())
+        );
+      }
+    }
+
+    res.json({ users });
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json({ message: "Server error during search" });
+  }
+});
 
   return router;
 };

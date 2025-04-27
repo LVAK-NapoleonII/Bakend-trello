@@ -15,7 +15,6 @@ const {
 const authMiddleware = require("../middlewares/authMiddleware");
 const activityMiddleware = require("../middlewares/activityMiddleware");
 const notificationMiddleware = require("../middlewares/notificationMiddleware");
-const User = require("../models/User")
 
 module.exports = (io) => {
   const router = express.Router();
@@ -89,6 +88,8 @@ module.exports = (io) => {
    *                       type: string
    *                     fullName:
    *                       type: string
+   *                     isOnline:
+   *                       type: boolean
    *                 workspace:
    *                   type: object
    *                   properties:
@@ -101,14 +102,21 @@ module.exports = (io) => {
    *                   items:
    *                     type: object
    *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       avatar:
-   *                         type: string
+   *                       user:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           email:
+   *                             type: string
+   *                           fullName:
+   *                             type: string
+   *                           avatar:
+   *                             type: string
+   *                           isOnline:
+   *                             type: boolean
+   *                       isActive:
+   *                         type: boolean
    *       400:
    *         description: Thiếu title, workspace hoặc workspace ID không hợp lệ
    *       401:
@@ -141,49 +149,61 @@ module.exports = (io) => {
    *         content:
    *           application/json:
    *             schema:
-   *               type: array
-   *               items:
-   *                 type: object
-   *                 properties:
-   *                   _id:
-   *                     type: string
-   *                   title:
-   *                     type: string
-   *                   description:
-   *                     type: string
-   *                   background:
-   *                     type: string
-   *                   visibility:
-   *                     type: string
-   *                   owner:
+   *               type: object
+   *               properties:
+   *                 boards:
+   *                   type: array
+   *                   items:
    *                     type: object
    *                     properties:
    *                       _id:
    *                         type: string
-   *                       email:
+   *                       title:
    *                         type: string
-   *                       fullName:
+   *                       description:
    *                         type: string
-   *                   workspace:
-   *                     type: object
-   *                     properties:
-   *                       _id:
+   *                       background:
    *                         type: string
-   *                       name:
+   *                       visibility:
    *                         type: string
-   *                   members:
-   *                     type: array
-   *                     items:
-   *                       type: object
-   *                       properties:
-   *                         _id:
-   *                           type: string
-   *                         email:
-   *                           type: string
-   *                         fullName:
-   *                           type: string
-   *                         avatar:
-   *                           type: string
+   *                       owner:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           email:
+   *                             type: string
+   *                           fullName:
+   *                             type: string
+   *                           isOnline:
+   *                             type: boolean
+   *                       workspace:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           name:
+   *                             type: string
+   *                       members:
+   *                         type: array
+   *                         items:
+   *                           type: object
+   *                           properties:
+   *                             user:
+   *                               type: object
+   *                               properties:
+   *                                 _id:
+   *                                   type: string
+   *                                 email:
+   *                                   type: string
+   *                                 fullName:
+   *                                   type: string
+   *                                 avatar:
+   *                                   type: string
+   *                                 isOnline:
+   *                                   type: boolean
+   *                             isActive:
+   *                               type: boolean
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       500:
@@ -233,6 +253,8 @@ module.exports = (io) => {
    *                       type: string
    *                     fullName:
    *                       type: string
+   *                     isOnline:
+   *                       type: boolean
    *                 workspace:
    *                   type: object
    *                   properties:
@@ -245,27 +267,41 @@ module.exports = (io) => {
    *                   items:
    *                     type: object
    *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       avatar:
-   *                         type: string
+   *                       user:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           email:
+   *                             type: string
+   *                           fullName:
+   *                             type: string
+   *                           avatar:
+   *                             type: string
+   *                           isOnline:
+   *                             type: boolean
+   *                       isActive:
+   *                         type: boolean
    *                 invitedUsers:
    *                   type: array
    *                   items:
    *                     type: object
    *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       avatar:
-   *                         type: string
+   *                       user:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           email:
+   *                             type: string
+   *                           fullName:
+   *                             type: string
+   *                           avatar:
+   *                             type: string
+   *                           isOnline:
+   *                             type: boolean
+   *                       isActive:
+   *                         type: boolean
    *       403:
    *         description: Không có quyền truy cập bảng
    *       404:
@@ -338,6 +374,8 @@ module.exports = (io) => {
    *                       type: string
    *                     fullName:
    *                       type: string
+   *                     isOnline:
+   *                       type: boolean
    *                 workspace:
    *                   type: object
    *                   properties:
@@ -350,14 +388,21 @@ module.exports = (io) => {
    *                   items:
    *                     type: object
    *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       avatar:
-   *                         type: string
+   *                       user:
+   *                         type: object
+   *                         properties:
+   *                           _id:
+   *                             type: string
+   *                           email:
+   *                             type: string
+   *                           fullName:
+   *                             type: string
+   *                           avatar:
+   *                             type: string
+   *                           isOnline:
+   *                             type: boolean
+   *                       isActive:
+   *                         type: boolean
    *       403:
    *         description: Không có quyền cập nhật bảng
    *       404:
@@ -531,27 +576,41 @@ module.exports = (io) => {
    *                       items:
    *                         type: object
    *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
+   *                           user:
+   *                             type: object
+   *                             properties:
+   *                               _id:
+   *                                 type: string
+   *                               email:
+   *                                 type: string
+   *                               fullName:
+   *                                 type: string
+   *                               avatar:
+   *                                 type: string
+   *                               isOnline:
+   *                                 type: boolean
+   *                           isActive:
+   *                             type: boolean
    *                     invitedUsers:
    *                       type: array
    *                       items:
    *                         type: object
    *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
+   *                           user:
+   *                             type: object
+   *                             properties:
+   *                               _id:
+   *                                 type: string
+   *                               email:
+   *                                 type: string
+   *                               fullName:
+   *                                 type: string
+   *                               avatar:
+   *                                 type: string
+   *                               isOnline:
+   *                                 type: boolean
+   *                           isActive:
+   *                             type: boolean
    *       400:
    *         description: Thiếu email/userId, user đã là thành viên, hoặc ID không hợp lệ
    *       403:
@@ -617,14 +676,21 @@ module.exports = (io) => {
    *                       items:
    *                         type: object
    *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
+   *                           user:
+   *                             type: object
+   *                             properties:
+   *                               _id:
+   *                                 type: string
+   *                               email:
+   *                                 type: string
+   *                               fullName:
+   *                                 type: string
+   *                               avatar:
+   *                                 type: string
+   *                               isOnline:
+   *                                 type: boolean
+   *                           isActive:
+   *                             type: boolean
    *       400:
    *         description: ID không hợp lệ hoặc không thể xóa chủ phòng
    *       403:
@@ -682,6 +748,8 @@ module.exports = (io) => {
    *                         type: string
    *                       fullName:
    *                         type: string
+   *                       isOnline:
+   *                         type: boolean
    *                   action:
    *                     type: string
    *                   target:
@@ -742,14 +810,21 @@ module.exports = (io) => {
    *                       items:
    *                         type: object
    *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
+   *                           user:
+   *                             type: object
+   *                             properties:
+   *                               _id:
+   *                                 type: string
+   *                               email:
+   *                                 type: string
+   *                               fullName:
+   *                                 type: string
+   *                               avatar:
+   *                                 type: string
+   *                               isOnline:
+   *                                 type: boolean
+   *                           isActive:
+   *                             type: boolean
    *       400:
    *         description: Chủ phòng không thể rời bảng
    *       403:
@@ -828,19 +903,28 @@ module.exports = (io) => {
    *                           type: string
    *                         fullName:
    *                           type: string
+   *                         isOnline:
+   *                           type: boolean
    *                     members:
    *                       type: array
    *                       items:
    *                         type: object
    *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
+   *                           user:
+   *                             type: object
+   *                             properties:
+   *                               _id:
+   *                                 type: string
+   *                               email:
+   *                                 type: string
+   *                               fullName:
+   *                                 type: string
+   *                               avatar:
+   *                                 type: string
+   *                               isOnline:
+   *                                 type: boolean
+   *                           isActive:
+   *                             type: boolean
    *       400:
    *         description: ID không hợp lệ hoặc user không phải thành viên
    *       403:
