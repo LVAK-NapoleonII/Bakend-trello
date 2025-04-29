@@ -296,7 +296,7 @@ const updateCardOrder = async (req, res, io) => {
     }
 
     // Kiểm tra cardOrder
-    if (!Array.isArray(cardOrder) || cardOrder.length === 0) {
+    if (!Array.isArray(cardOrder)) {
       console.log("Invalid cardOrder:", cardOrder);
       return res.status(400).json({ message: "Danh sách thứ tự thẻ không hợp lệ!" });
     }
@@ -322,21 +322,23 @@ const updateCardOrder = async (req, res, io) => {
       return res.status(403).json({ message: "Bạn không có quyền cập nhật list này!" });
     }
 
-    // Kiểm tra từng cardId trong cardOrder
-    console.log("Validating cardOrder:", cardOrder);
-    for (const cardId of cardOrder) {
-      if (!mongoose.Types.ObjectId.isValid(cardId)) {
-        console.log("Invalid cardId:", cardId);
-        return res.status(400).json({ message: `Card ID ${cardId} không hợp lệ!` });
-      }
-      const card = await Card.findOne({ _id: cardId, isDeleted: false });
-      if (!card) {
-        console.log("Card not found or deleted:", cardId);
-        return res.status(404).json({ message: `Card ${cardId} không tồn tại hoặc đã bị ẩn!` });
-      }
-      if (card.list.toString() !== listId) {
-        console.log("Card does not belong to this list:", { cardId, listId });
-        return res.status(400).json({ message: `Card ${cardId} không thuộc list này!` });
+    // Kiểm tra cardOrder nếu không rỗng
+    if (cardOrder.length > 0) {
+      console.log("Validating cardOrder:", cardOrder);
+      for (const cardId of cardOrder) {
+        if (!mongoose.Types.ObjectId.isValid(cardId)) {
+          console.log("Invalid cardId:", cardId);
+          return res.status(400).json({ message: `Card ID ${cardId} không hợp lệ!` });
+        }
+        const card = await Card.findOne({ _id: cardId, isDeleted: false });
+        if (!card) {
+          console.log("Card not found or deleted:", cardId);
+          return res.status(404).json({ message: `Card ${cardId} không tồn tại hoặc đã bị ẩn!` });
+        }
+        if (card.list.toString() !== listId) {
+          console.log("Card does not belong to this list:", { cardId, listId });
+          return res.status(400).json({ message: `Card ${cardId} không thuộc list này!` });
+        }
       }
     }
 
@@ -386,6 +388,7 @@ const updateCardOrder = async (req, res, io) => {
     return res.status(500).json({ message: "Lỗi server khi cập nhật thứ tự thẻ", error: err.message });
   }
 };
+
 // Xóa cột
 const deleteList = async (req, res, io) => {
   try {
