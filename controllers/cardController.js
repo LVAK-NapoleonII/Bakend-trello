@@ -204,51 +204,32 @@ const getCardsByList = async (req, res) => {
 // Lấy thông tin thẻ theo ID
 const getCardById = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    console.log("Fetching card with ID:", id);
-
-    if (!req.user || !req.user._id) {
-      console.log("No user found in req.user");
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    const card = await Card.findById(req.params.id)
+      .populate("members")
+      .populate({
+        path: "comments.user",
+        select: "fullName email avatar",
+      })
+      .populate({
+        path: "notes.createdBy",
+        select: "fullName email avatar",
+      });
+    if (!card || card.isDeleted) {
+      return res.status(404).json({ message: "Không tìm thấy thẻ!" });
     }
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      console.log("Invalid cardId:", id);
-      return res.status(400).json({ message: "Card ID không hợp lệ!" });
-    }
-
-    const card = await Card.findOne({ _id: id, isDeleted: false })
-      .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName avatar")
-      .populate("notes.createdBy", "email fullName avatar")
-      .populate({ path: "activities", match: { isDeleted: false } });
-
-    if (!card) {
-      console.log("Card not found or deleted:", id);
-      return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
-    }
-
-    const board = await Board.findOne({ _id: card.board, isDeleted: false });
-    if (!board) {
-      console.log("Board not found or deleted:", card.board.toString());
-      return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
-    }
-
-    const isMember = board.members.some(
-      (m) => m.user && m.user.toString() === req.user._id.toString() && m.isActive
-    );
-    if (!isMember) {
-      console.log("Permission denied for user:", req.user._id.toString());
-      return res.status(403).json({ message: "Bạn không có quyền truy cập thẻ này!" });
-    }
-
-    console.log("Card found:", { id, title: card.title });
-
-    return res.status(200).json(card);
+    // Lọc checklist và item đã xóa
+    const filteredCard = {
+      ...card._doc,
+      checklists: card.checklists
+        .filter((checklist) => !checklist.isDeleted)
+        .map((checklist) => ({
+          ...checklist._doc,
+          items: checklist.items.filter((item) => !item.isDeleted),
+        })),
+    };
+    res.status(200).json(filteredCard);
   } catch (err) {
-    console.error("Error in getCardById:", err.message, err.stack);
-    return res.status(500).json({ message: "Lỗi khi lấy thông tin thẻ", error: err.message });
+    res.status(500).json({ message: "Lỗi server", error: err.message });
   }
 };
 
