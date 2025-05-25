@@ -37,18 +37,21 @@ const addChecklist = async (req, res, io) => {
       return res.status(400).json({ message: "Card ID không hợp lệ!" });
     }
 
+    console.log("Fetching card:", cardId);
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
     if (!card) {
       console.log("Card not found or deleted:", cardId);
       return res.status(404).json({ message: "Không tìm thấy thẻ hoặc thẻ đã bị ẩn!" });
     }
 
+    console.log("Fetching board:", card.board.toString());
     const board = await Board.findOne({ _id: card.board, isDeleted: false }).populate("members.user");
     if (!board) {
       console.log("Board not found or deleted:", card.board.toString());
       return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
     }
 
+    console.log("Checking membership for user:", req.user._id.toString());
     const isMember = board.members.some(
       (m) => m.user && m.user._id.toString() === req.user._id.toString() && m.isActive
     );
@@ -61,13 +64,17 @@ const addChecklist = async (req, res, io) => {
       _id: new mongoose.Types.ObjectId(),
       title,
       items: [],
-      isDeleted: false, // Đảm bảo trường isDeleted được khởi tạo
+      isDeleted: false,
     };
 
+    console.log("Pushing checklist to card:", checklist);
     card.checklists.push(checklist);
+    console.log("Saving card...");
     await card.save();
+    console.log("Card saved successfully");
 
     const userName = req.user.fullName || req.user.email || "Unknown User";
+    console.log("Creating activity for checklist addition");
     const activity = new Activity({
       user: req.user._id,
       action: "checklist_added",
@@ -76,10 +83,15 @@ const addChecklist = async (req, res, io) => {
       details: `User ${userName} added checklist "${title}" to card "${card.title}"`,
     });
     await activity.save();
+    console.log("Activity saved:", activity._id);
+
+    console.log("Updating card and board activities");
     card.activities.push(activity._id);
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
+    console.log("Card and board activities updated");
 
+    console.log("Emitting Socket.IO event: checklist-added");
     io.to(card.board.toString()).emit("checklist-added", {
       cardId,
       checklist,
@@ -89,10 +101,15 @@ const addChecklist = async (req, res, io) => {
 
     console.log("Checklist added successfully:", { cardId, checklistId: checklist._id });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json(filterChecklists(card.checklists));
   } catch (err) {
-    console.error("Error in addChecklist:", err.message, err.stack);
+    console.error("Error in addChecklist:", {
+      message: err.message,
+      stack: err.stack,
+      cardId,
+      userId: req.user?._id?.toString(),
+      title,
+    });
     res.status(500).json({ message: "Lỗi khi thêm checklist", error: err.message });
   }
 };
@@ -100,17 +117,17 @@ const addChecklist = async (req, res, io) => {
 // Thêm item vào checklist
 const addChecklistItem = async (req, res, io) => {
   const { cardId, checklistId } = req.params;
-  const { text, version } = req.body;
+  const { title, content, version } = req.body; // Thay text bằng title và content
 
   try {
-    console.log("Adding checklist item:", { cardId, checklistId, text, user: req.user?.email });
+    console.log("Adding checklist item:", { cardId, checklistId, title, content, user: req.user?.email });
 
     if (!req.user || !req.user._id) {
       return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     }
 
-    if (!text || typeof text !== "string") {
-      return res.status(400).json({ message: "Text là bắt buộc và phải là chuỗi!" });
+    if (!title || typeof title !== "string" || !content || typeof content !== "string") {
+      return res.status(400).json({ message: "Title và content là bắt buộc và phải là chuỗi!" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(cardId) || !mongoose.Types.ObjectId.isValid(checklistId)) {
@@ -145,10 +162,11 @@ const addChecklistItem = async (req, res, io) => {
 
     const newItem = {
       _id: new mongoose.Types.ObjectId(),
-      text,
+      title, // Thêm title
+      content, // Thêm content
       completed: false,
       createdAt: new Date(),
-      isDeleted: false, // Đảm bảo trường isDeleted được khởi tạo
+      isDeleted: false,
     };
 
     checklist.items.push(newItem);
@@ -161,7 +179,7 @@ const addChecklistItem = async (req, res, io) => {
       action: "checklist_item_added",
       target: card._id,
       targetModel: "Card",
-      details: `User ${userName} added item "${text}" to checklist in card "${card.title}"`,
+      details: `User ${userName} added item "${title}" to checklist in card "${card.title}"`, // Dùng title thay vì text
     });
     await activity.save();
     card.activities.push(activity._id);
@@ -175,16 +193,15 @@ const addChecklistItem = async (req, res, io) => {
       checklist: {
         _id: checklist._id,
         title: checklist.title,
-        items: checklist.items.filter((item) => !item.isDeleted), // Lọc item trong sự kiện
+        items: checklist.items.filter((item) => !item.isDeleted),
       },
       boardId: card.board.toString(),
-      message: `${userName} đã thêm item "${text}" vào checklist trong card "${card.title}"`,
+      message: `${userName} đã thêm item "${title}" vào checklist trong card "${card.title}"`, // Dùng title
       actorId: req.user._id.toString(),
     });
 
-    console.log("Checklist item added successfully:", { cardId, checklistId, text });
+    console.log("Checklist item added successfully:", { cardId, checklistId, title, content });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json({ checklists: filterChecklists(card.checklists), version: card.version });
   } catch (err) {
     console.error("Error in addChecklistItem:", err.message, err.stack);
@@ -255,7 +272,7 @@ const toggleChecklistItem = async (req, res, io) => {
       action,
       target: card._id,
       targetModel: "Card",
-      details: `User ${userName} ${item.completed ? "completed" : "uncompleted"} item "${item.text}" in checklist of card "${card.title}"`,
+      details: `User ${userName} ${item.completed ? "completed" : "uncompleted"} item "${item.title}" in checklist of card "${card.title}"`, // Dùng title
     });
     await activity.save();
 
@@ -269,7 +286,7 @@ const toggleChecklistItem = async (req, res, io) => {
       if (memberId.toString() !== req.user._id.toString()) {
         const notification = new Notification({
           user: memberId,
-          message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.text}" trong card "${card.title}"`,
+          message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.title}" trong card "${card.title}"`, // Dùng title
           type: "activity",
           target: card._id,
           targetModel: "Card",
@@ -287,10 +304,10 @@ const toggleChecklistItem = async (req, res, io) => {
       checklist: {
         _id: checklist._id,
         title: checklist.title,
-        items: checklist.items.filter((item) => !item.isDeleted), // Lọc item trong sự kiện
+        items: checklist.items.filter((item) => !item.isDeleted),
       },
       boardId: card.board.toString(),
-      message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.text}" trong card "${card.title}"`,
+      message: `${userName} đã ${item.completed ? "hoàn thành" : "bỏ hoàn thành"} item "${item.title}" trong card "${card.title}"`, // Dùng title
       actorId: req.user._id.toString(),
     });
 
@@ -301,7 +318,6 @@ const toggleChecklistItem = async (req, res, io) => {
       completed: item.completed,
     });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json({ checklists: filterChecklists(card.checklists), version: card.version });
   } catch (err) {
     console.error("Error in toggleChecklistItem:", {
@@ -388,7 +404,7 @@ const editChecklist = async (req, res, io) => {
       checklist: {
         _id: checklist._id,
         title: checklist.title,
-        items: checklist.items.filter((item) => !item.isDeleted), // Lọc item trong sự kiện
+        items: checklist.items.filter((item) => !item.isDeleted),
       },
       boardId: card.board.toString(),
       message: `${userName} đã cập nhật tiêu đề checklist thành "${title}" trong card "${card.title}"`,
@@ -396,7 +412,6 @@ const editChecklist = async (req, res, io) => {
 
     console.log("Checklist updated successfully:", { cardId, checklistId, title });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json(filterChecklists(card.checklists));
   } catch (err) {
     console.error("Error in editChecklist:", err.message, err.stack);
@@ -487,7 +502,6 @@ const deleteChecklist = async (req, res, io) => {
 
     console.log("Checklist deleted successfully:", { cardId, checklistId });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json(filterChecklists(card.checklists));
   } catch (err) {
     console.error("Error in deleteChecklist:", err.message, err.stack);
@@ -498,14 +512,15 @@ const deleteChecklist = async (req, res, io) => {
 // Sửa checklist item
 const editChecklistItem = async (req, res, io) => {
   const { cardId, checklistId, itemId } = req.params;
-  const { text } = req.body;
+  const { title, content } = req.body; // Thay text bằng title và content
 
   try {
     console.log("Editing checklist item:", {
       cardId,
       checklistId,
       itemId,
-      text,
+      title,
+      content,
       user: req.user?.email,
     });
 
@@ -519,9 +534,9 @@ const editChecklistItem = async (req, res, io) => {
       return res.status(400).json({ message: "Card ID, checklist ID hoặc item ID không hợp lệ!" });
     }
 
-    if (!text || typeof text !== "string") {
-      console.log("Invalid text:", text);
-      return res.status(400).json({ message: "Nội dung item là bắt buộc và phải là chuỗi!" });
+    if (!title || typeof title !== "string" || !content || typeof content !== "string") {
+      console.log("Invalid title or content:", { title, content });
+      return res.status(400).json({ message: "Title và content là bắt buộc và phải là chuỗi!" });
     }
 
     const card = await Card.findOne({ _id: cardId, isDeleted: false });
@@ -556,7 +571,8 @@ const editChecklistItem = async (req, res, io) => {
       return res.status(404).json({ message: "Không tìm thấy item hoặc item đã bị xóa!" });
     }
 
-    item.text = text;
+    item.title = title; // Cập nhật title
+    item.content = content; // Cập nhật content
     await card.save();
 
     const userName = req.user.fullName || req.user.email || "Unknown User";
@@ -565,7 +581,7 @@ const editChecklistItem = async (req, res, io) => {
       action: "checklist_item_updated",
       target: card._id,
       targetModel: "Card",
-      details: `User ${userName} updated checklist item to "${text}" in card "${card.title}"`,
+      details: `User ${userName} updated checklist item to "${title}" in card "${card.title}"`, // Dùng title
     });
     await activity.save();
     card.activities.push(activity._id);
@@ -580,20 +596,20 @@ const editChecklistItem = async (req, res, io) => {
       checklist: {
         _id: checklist._id,
         title: checklist.title,
-        items: checklist.items.filter((item) => !item.isDeleted), // Lọc item trong sự kiện
+        items: checklist.items.filter((item) => !item.isDeleted),
       },
       boardId: card.board.toString(),
-      message: `${userName} đã cập nhật item "${text}" trong checklist của card "${card.title}"`,
+      message: `${userName} đã cập nhật item "${title}" trong checklist của card "${card.title}"`, // Dùng title
     });
 
     console.log("Checklist item updated successfully:", {
       cardId,
       checklistId,
       itemId,
-      text,
+      title,
+      content,
     });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json(filterChecklists(card.checklists));
   } catch (err) {
     console.error("Error in editChecklistItem:", err.message, err.stack);
@@ -647,7 +663,7 @@ const deleteChecklistItem = async (req, res, io) => {
       return res.status(400).json({ message: "Item đã được xóa trước đó!" });
     }
 
-    const itemText = item.text;
+    const itemTitle = item.title; // Dùng title thay vì text
     item.isDeleted = true;
     await card.save();
 
@@ -657,7 +673,7 @@ const deleteChecklistItem = async (req, res, io) => {
       action: "checklist_item_deleted",
       target: card._id,
       targetModel: "Card",
-      details: `User ${userName} deleted item "${itemText}" from checklist in card "${card.title}"`,
+      details: `User ${userName} deleted item "${itemTitle}" from checklist in card "${card.title}"`, // Dùng title
     });
     await activity.save();
     card.activities.push(activity._id);
@@ -669,7 +685,7 @@ const deleteChecklistItem = async (req, res, io) => {
       .map((memberId) => {
         const notification = new Notification({
           user: memberId,
-          message: `${userName} đã xóa item "${itemText}" khỏi checklist trong card "${card.title}"`,
+          message: `${userName} đã xóa item "${itemTitle}" khỏi checklist trong card "${card.title}"`, // Dùng title
           type: "activity",
           target: card._id,
           targetModel: "Card",
@@ -687,15 +703,14 @@ const deleteChecklistItem = async (req, res, io) => {
       checklist: {
         _id: checklist._id,
         title: checklist.title,
-        items: checklist.items.filter((item) => !item.isDeleted), // Lọc item trong sự kiện
+        items: checklist.items.filter((item) => !item.isDeleted),
       },
       boardId: card.board.toString(),
-      message: `${userName} đã xóa item "${itemText}" khỏi checklist trong card "${card.title}"`,
+      message: `${userName} đã xóa item "${itemTitle}" khỏi checklist trong card "${card.title}"`, // Dùng title
     });
 
     console.log("Checklist item deleted successfully:", { cardId, checklistId, itemId });
 
-    // Lọc danh sách checklist trước khi trả về
     res.status(200).json(filterChecklists(card.checklists));
   } catch (err) {
     console.error("Error in deleteChecklistItem:", err.message, err.stack);
