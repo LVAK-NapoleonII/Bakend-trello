@@ -32,7 +32,7 @@ module.exports = (io) => {
    * @swagger
    * tags:
    *   name: Cards
-   *   description: Quản lý thẻ trong cột
+   *   description: API để quản lý thẻ, bình luận, ghi chú và checklist trong hệ thống quản lý dự án.
    */
 
   /**

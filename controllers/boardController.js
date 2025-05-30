@@ -135,7 +135,6 @@ const getUserBoards = async (req, res) => {
 const getBoardById = async (req, res) => {
   try {
     console.log("Fetching board ID:", req.params.id, "User:", req.user?.email);
-
     const board = await Board.findOne({ _id: req.params.id, isDeleted: false })
       .populate({
         path: "members.user",
@@ -172,7 +171,6 @@ const getBoardById = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: err.message });
   }
 };
-
 // Cập nhật board
 const updateBoard = async (req, res, io) => {
   try {
@@ -269,13 +267,14 @@ const deleteBoard = async (req, res, io) => {
         target: board._id,
         targetModel: "Board",
         isRead: false,
+        isHidden: false,
       }));
-
-    if (notifications.length > 0) {
-      const createdNotifications = await Notification.insertMany(notifications);
-      createdNotifications.forEach((notification) => {
-        io.to(notification.user.toString()).emit("new-notification", notification);
-      });
+      const validNotifications = notifications.filter(n => mongoose.Types.ObjectId.isValid(n.user));
+      if (validNotifications.length > 0) {
+        const createdNotifications = await Notification.insertMany(validNotifications);
+        createdNotifications.forEach((notification) => {
+          io.to(notification.user.toString()).emit("new-notification", notification);
+        });
     }
 
     // Lưu board và workspace
@@ -498,6 +497,7 @@ const inviteMember = async (req, res, io) => {
         target: board._id,
         targetModel: "Board",
         isRead: false,
+        isHidden: false,
       });
       await notification.save();
 
@@ -634,6 +634,8 @@ const removeMember = async (req, res, io) => {
       type: "activity",
       target: board._id,
       targetModel: "Board",
+      isRead: false,
+      isHidden: false,
     });
     await notification.save();
 
@@ -790,6 +792,7 @@ const leaveBoard = async (req, res, io) => {
       type: "activity",
       target: board._id,
       targetModel: "Board",
+
     });
     await notification.save();
 
@@ -881,6 +884,8 @@ const transferOwnership = async (req, res, io) => {
       type: "activity",
       target: board._id,
       targetModel: "Board",
+      isRead: false,
+      isHidden: false,
     });
     await notification.save();
     newOwner.notifications.push(notification._id);

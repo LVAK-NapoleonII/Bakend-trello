@@ -501,6 +501,8 @@ const moveCard = async (req, res, io) => {
           type: "activity",
           target: card._id,
           targetModel: "Card",
+          isRead: false,
+          isHidden: false,
         });
         await notification.save();
         io.to(member.toString()).emit("new-notification", notification);
@@ -645,6 +647,8 @@ const addMember = async (req, res, io) => {
       type: "activity",
       target: card._id,
       targetModel: "Card",
+      isRead: false,
+      isHidden: false,
     });
     await notification.save();
     io.to(memberId.toString()).emit("new-notification", notification);
@@ -753,6 +757,8 @@ const removeMemberFromCard = async (req, res, io) => {
         type: "activity",
         target: card._id,
         targetModel: "Card",
+        isRead: false,
+        sHidden: false,
       });
       await notification.save();
       io.to(memberId.toString()).emit("new-notification", notification);
