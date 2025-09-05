@@ -6,6 +6,7 @@ const listSchema = new mongoose.Schema(
     board: { type: mongoose.Schema.Types.ObjectId, ref: "Board", required: true },
     position: { type: Number, default: 0 },
     cardOrderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Card", default: [] }],
+    dueDate: { type: Date },
     isDeleted: { type: Boolean, default: false },
     activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity", default: [] }],
   },

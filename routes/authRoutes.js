@@ -16,8 +16,6 @@ const notificationMiddleware = require("../middlewares/notificationMiddleware");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const User = require("../models/User");
-const Board = require("../models/Board");
 
 // Đảm bảo thư mục uploads tồn tại
 const uploadDir = path.join(__dirname, "../Uploads");
@@ -49,12 +47,15 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
 // Middleware xử lý lỗi upload
 const handleUploadError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: "File quá lớn. Giới hạn 5MB" });
+    }
     return res.status(400).json({ message: "Lỗi upload file: " + err.message });
   } else if (err) {
     return res.status(400).json({ message: err.message });
@@ -62,8 +63,8 @@ const handleUploadError = (err, req, res, next) => {
   next();
 };
 
-// Hàm khởi tạo router với io làm tham số
-module.exports = (io) => {
+// Hàm khởi tạo router
+module.exports = () => {
   const router = express.Router();
 
   /**
@@ -74,6 +75,25 @@ module.exports = (io) => {
    *       type: http
    *       scheme: bearer
    *       bearerFormat: JWT
+   *   schemas:
+   *     User:
+   *       type: object
+   *       properties:
+   *         _id:
+   *           type: string
+   *         fullName:
+   *           type: string
+   *         email:
+   *           type: string
+   *         avatar:
+   *           type: string
+   *         isOnline:
+   *           type: boolean
+   *     ApiResponse:
+   *       type: object
+   *       properties:
+   *         message:
+   *           type: string
    */
 
   /**
@@ -88,23 +108,41 @@ module.exports = (io) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             required:
+   *               - fullName
+   *               - email
+   *               - password
    *             properties:
    *               fullName:
    *                 type: string
    *                 example: "Nguyễn Văn A"
    *               email:
    *                 type: string
+   *                 format: email
    *                 example: "user@example.com"
    *               password:
    *                 type: string
+   *                 minLength: 6
    *                 example: "password123"
    *     responses:
    *       201:
    *         description: Đăng ký thành công, yêu cầu xác thực OTP
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       400:
    *         description: Email đã tồn tại hoặc thiếu thông tin
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post("/register", register);
 
@@ -120,20 +158,37 @@ module.exports = (io) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             required:
+   *               - email
+   *               - otp
    *             properties:
    *               email:
    *                 type: string
+   *                 format: email
    *                 example: "user@example.com"
    *               otp:
    *                 type: string
+   *                 pattern: '^[0-9]{6}$'
    *                 example: "123456"
    *     responses:
    *       200:
    *         description: Xác thực thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       400:
    *         description: OTP không hợp lệ hoặc đã hết hạn
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post("/verify-otp", verifyOTP);
 
@@ -149,9 +204,13 @@ module.exports = (io) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             required:
+   *               - email
+   *               - password
    *             properties:
    *               email:
    *                 type: string
+   *                 format: email
    *                 example: "user@example.com"
    *               password:
    *                 type: string
@@ -167,24 +226,21 @@ module.exports = (io) => {
    *                 token:
    *                   type: string
    *                 user:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     avatar:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
+   *                   $ref: '#/components/schemas/User'
    *       400:
-   *         description: Sai email hoặc mật khẩu
+   *         description: Email chưa được xác thực, không tồn tại hoặc sai mật khẩu
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
-  router.post("/login", (req, res) => login(req, res, io));
+  router.post("/login", login);
 
   /**
    * @swagger
@@ -195,8 +251,19 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Làm mới token thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 token:
+   *                   type: string
    *       401:
-   *         description: Refresh token không hợp lệ
+   *         description: Không có refresh token hoặc refresh token không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post("/refresh-token", refreshToken);
 
@@ -204,39 +271,38 @@ module.exports = (io) => {
    * @swagger
    * /api/auth/profile:
    *   get:
-   *     summary: Lấy hồ sơ người dùng
+   *     summary: Lấy thông tin hồ sơ người dùng hiện tại
    *     tags: [Auth]
    *     security:
    *       - BearerAuth: []
    *     responses:
    *       200:
-   *         description: Hồ sơ người dùng
+   *         description: Thông tin hồ sơ người dùng
    *         content:
    *           application/json:
    *             schema:
    *               type: object
    *               properties:
-   *                 message:
-   *                   type: string
    *                 user:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     avatar:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
+   *                   $ref: '#/components/schemas/User'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       404:
    *         description: Người dùng không tồn tại
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.get("/profile", authMiddleware, getProfile);
 
@@ -252,17 +318,32 @@ module.exports = (io) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             required:
+   *               - email
    *             properties:
    *               email:
    *                 type: string
-   *                 example: "test@example.com"
+   *                 format: email
+   *                 example: "user@example.com"
    *     responses:
    *       200:
-   *         description: OTP đã được gửi
+   *         description: OTP đã được gửi thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       400:
-   *         description: Email không tồn tại
+   *         description: Email không tồn tại hoặc thiếu thông tin
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post("/forgot-password", forgotPassword);
 
@@ -278,23 +359,48 @@ module.exports = (io) => {
    *         application/json:
    *           schema:
    *             type: object
+   *             required:
+   *               - email
+   *               - otp
+   *               - newPassword
    *             properties:
    *               email:
    *                 type: string
-   *                 example: "test@example.com"
+   *                 format: email
+   *                 example: "user@example.com"
    *               otp:
    *                 type: string
+   *                 pattern: '^[0-9]{6}$'
    *                 example: "123456"
    *               newPassword:
    *                 type: string
+   *                 minLength: 6
    *                 example: "newpassword123"
    *     responses:
    *       200:
-   *         description: Mật khẩu đã cập nhật thành công
+   *         description: Mật khẩu đã được cập nhật thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       400:
-   *         description: OTP không hợp lệ hoặc hết hạn
+   *         description: Thiếu thông tin bắt buộc hoặc email không tồn tại
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
+   *       401:
+   *         description: OTP không hợp lệ hoặc đã hết hạn
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post("/reset-password", resetPassword);
 
@@ -312,10 +418,13 @@ module.exports = (io) => {
    *         multipart/form-data:
    *           schema:
    *             type: object
+   *             required:
+   *               - avatar
    *             properties:
    *               avatar:
    *                 type: string
    *                 format: binary
+   *                 description: File ảnh (jpeg, png, gif) với kích thước tối đa 5MB
    *     responses:
    *       200:
    *         description: Cập nhật avatar thành công
@@ -327,24 +436,31 @@ module.exports = (io) => {
    *                 message:
    *                   type: string
    *                 user:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     avatar:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
+   *                   $ref: '#/components/schemas/User'
    *       400:
-   *         description: Thiếu file avatar
+   *         description: Thiếu file avatar hoặc file không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
+   *       404:
+   *         description: Người dùng không tồn tại
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
   router.post(
     "/update-avatar",
@@ -370,12 +486,24 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Đăng xuất thành công
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
-  router.post("/logout", authMiddleware, (req, res) => logout(req, res, io));
+  router.post("/logout", authMiddleware, logout);
 
   /**
    * @swagger
@@ -391,6 +519,7 @@ module.exports = (io) => {
    *         required: true
    *         schema:
    *           type: string
+   *           minLength: 1
    *         description: Từ khóa tìm kiếm (email hoặc tên)
    *         example: "user@example.com"
    *       - in: query
@@ -410,80 +539,45 @@ module.exports = (io) => {
    *                 users:
    *                   type: array
    *                   items:
-   *                     type: object
-   *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       avatar:
-   *                         type: string
-   *                       isOnline:
-   *                         type: boolean
-   *                       isPastMember:
-   *                         type: boolean
-   *                       isInvited:
-   *                         type: boolean
+   *                     allOf:
+   *                       - $ref: '#/components/schemas/User'
+   *                       - type: object
+   *                         properties:
+   *                           isPastMember:
+   *                             type: boolean
+   *                             description: Có phải là thành viên cũ của bảng không
    *       400:
-   *         description: Query không hợp lệ
+   *         description: Query là bắt buộc hoặc boardId không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
+   *       403:
+   *         description: Bạn không có quyền truy cập bảng này
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
+   *       404:
+   *         description: Bảng không tồn tại
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       500:
    *         description: Lỗi server
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    */
-  router.get("/search", authMiddleware, async (req, res) => {
-  try {
-    const { query, boardId, onlyActiveMembers } = req.query;
-    if (!query && !onlyActiveMembers) {
-      return res.status(400).json({ message: "Query is required unless onlyActiveMembers is specified" });
-    }
-
-    let users = [];
-
-    if (onlyActiveMembers && boardId) {
-      // Trả về các thành viên active của bảng
-      const board = await Board.findById(boardId).select("members");
-      if (!board) {
-        return res.status(404).json({ message: "Board not found" });
-      }
-      const activeMemberIds = board.members
-        .filter((m) => m.isActive)
-        .map((m) => m.user);
-      users = await User.find({ _id: { $in: activeMemberIds } }).select(
-        "_id fullName email avatar isOnline"
-      );
-    } else {
-      // Tìm kiếm người dùng theo query
-      users = await User.find({
-        $or: [
-          { email: { $regex: query || "", $options: "i" } },
-          { fullName: { $regex: query || "", $options: "i" } },
-        ],
-      }).select("_id fullName email avatar isOnline");
-
-      // Nếu có boardId, loại bỏ các thành viên active (dành cho các trường hợp khác, như mời thành viên mới)
-      if (boardId && !onlyActiveMembers) {
-        const board = await Board.findById(boardId).select("members");
-        if (!board) {
-          return res.status(404).json({ message: "Board not found" });
-        }
-        const activeMemberIds = board.members
-          .filter((m) => m.isActive)
-          .map((m) => m.user.toString());
-        users = users.filter(
-          (user) => !activeMemberIds.includes(user._id.toString())
-        );
-      }
-    }
-
-    res.json({ users });
-  } catch (err) {
-    console.error("Search error:", err);
-    res.status(500).json({ message: "Server error during search" });
-  }
-});
+  router.get("/search", authMiddleware, searchUsers);
 
   return router;
 };

@@ -9,7 +9,7 @@ const boardSchema = new mongoose.Schema({
   members: [
     {
       user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-      isActive: { type: Boolean, default: true }, // Thêm trạng thái
+      isActive: { type: Boolean, default: true }, 
     },
   ],
   listOrderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "List" }],
@@ -19,7 +19,15 @@ const boardSchema = new mongoose.Schema({
       isActive: { type: Boolean, default: true },
     },
   ],
+  automations: [{ type: mongoose.Schema.Types.ObjectId, ref: "Automation" }],
+  joinRequests: [
+    {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+    },
+  ],
   activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity" }], 
   isDeleted: { type: Boolean, default: false },
 }, { timestamps: true });
+boardSchema.index({ workspace: 1, owner: 1 });
 module.exports = mongoose.model("Board", boardSchema);

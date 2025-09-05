@@ -1,35 +1,16 @@
+// controllers/authController.js
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-const User = require("../models/User");
 const bcrypt = require("bcryptjs");
+const User = require("../models/User");
+const Board = require("../models/Board");
 const sendOTP = require("../utils/sendOTP");
-const nodemailer = require("nodemailer");
-const Board = require("../models/Board"); // Import Board model
-
-const transporter = nodemailer.createTransport({
-  service: "Gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-const generateRefreshToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
-};
 
 const register = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
-    const missingFields = [];
-    if (!fullName) missingFields.push("fullName");
-    if (!email) missingFields.push("email");
-    if (!password) missingFields.push("password");
-
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        message: `Vui lòng nhập đầy đủ các trường: ${missingFields.join(", ")}!`,
-      });
+    if (!fullName || !email || !password) {
+      return res.status(400).json({ message: "Vui lòng nhập đầy đủ thông tin" });
     }
 
     let user = await User.findOne({ email });
@@ -50,18 +31,11 @@ const register = async (req, res) => {
     });
     await user.save();
 
-    try {
-      await sendOTP(email, otp);
-      console.log("Register: OTP sent to:", email);
-    } catch (emailError) {
-      await User.deleteOne({ email });
-      console.error("Register: Failed to send OTP:", emailError.message);
-      return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau" });
-    }
+    await sendOTP(email, otp);
 
     res.status(201).json({ message: "Đăng ký thành công! Vui lòng kiểm tra email để xác nhận OTP." });
   } catch (error) {
-    console.error("Register: Error:", error.message, error.stack);
+    console.error("Register error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -82,88 +56,64 @@ const verifyOTP = async (req, res) => {
 
     res.status(200).json({ message: "Xác thực OTP thành công! Bạn có thể đăng nhập ngay bây giờ." });
   } catch (error) {
-    console.error("VerifyOTP: Error:", error.message, error.stack);
+    console.error("Verify OTP error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
 
-const login = async (req, res, io) => {
+const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log("Login attempt:", { email });
-
     const user = await User.findOne({ email });
-    if (!user) {
-      console.log("User not found for email:", email);
+    if (!user || !user.isVerified) {
       return res.status(400).json({ message: "Email chưa được xác thực hoặc không tồn tại" });
     }
 
-    if (!user.isVerified) {
-      console.log("User not verified:", email);
-      return res.status(400).json({ message: "Email chưa được xác thực hoặc không tồn tại" });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    console.log("Password match:", isMatch);
+    const isMatch = await user.matchPassword(password);
     if (!isMatch) return res.status(400).json({ message: "Sai email hoặc mật khẩu" });
 
     user.isOnline = true;
     await user.save();
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-    const refreshToken = generateRefreshToken(user._id);
+    const refreshToken = jwt.sign({ id: user._id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "30d" });
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 90 * 24 * 60 * 60 * 1000,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
-    io.emit("user-status-changed", {
-      userId: user._id,
-      isOnline: true,
-    });
-
-    const userData = {
-      _id: user._id,
-      fullName: user.fullName,
-      email: user.email,
-      avatar: user.avatar,
-      isOnline: user.isOnline,
-    };
-    console.log("Login response user data:", userData);
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("user-status-changed", { userId: user._id, isOnline: true });
+    }
 
     res.status(200).json({
       token,
-      user: userData,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        avatar: user.avatar,
+        isOnline: user.isOnline,
+      },
     });
   } catch (error) {
-    console.error("Login: Error:", error.message, error.stack);
+    console.error("Login error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
 
 const getProfile = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const user = await User.findById(userId).select("_id fullName email avatar isOnline");
-    if (!user) {
-      return res.status(404).json({ message: "Người dùng không tồn tại" });
-    }
+    const user = await User.findById(req.user._id).select("_id fullName email avatar isOnline");
+    if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
 
-    const userData = {
-      _id: user._id,
-      fullName: user.fullName,
-      email: user.email,
-      avatar: user.avatar,
-      isOnline: user.isOnline,
-    };
-    console.log("Profile response user data:", userData);
-
-    res.status(200).json({ user: userData });
+    res.status(200).json({ user });
   } catch (error) {
-    console.error("GetProfile: Error:", error.message, error.stack);
+    console.error("Get profile error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -171,22 +121,17 @@ const getProfile = async (req, res) => {
 const refreshToken = async (req, res) => {
   try {
     const refreshToken = req.cookies.refreshToken;
-    if (!refreshToken) {
-      return res.status(401).json({ message: "Không có refresh token" });
-    }
+    if (!refreshToken) return res.status(401).json({ message: "Không có refresh token" });
 
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
     const user = await User.findById(decoded.id);
-
-    if (!user) {
-      return res.status(401).json({ message: "Người dùng không tồn tại" });
-    }
+    if (!user) return res.status(401).json({ message: "Người dùng không tồn tại" });
 
     const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
     res.status(200).json({ token: newToken });
   } catch (error) {
-    console.error("RefreshToken: Error:", error.message, error.stack);
+    console.error("Refresh token error:", error.message);
     res.status(401).json({ message: "Refresh token không hợp lệ" });
   }
 };
@@ -194,37 +139,21 @@ const refreshToken = async (req, res) => {
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    console.log("ForgotPassword: Request:", { email });
-
     if (!email) return res.status(400).json({ message: "Vui lòng nhập email" });
 
     const user = await User.findOne({ email });
-    if (!user) {
-      console.log("ForgotPassword: Email not found:", email);
-      return res.status(400).json({ message: "Email không tồn tại" });
-    }
+    if (!user) return res.status(400).json({ message: "Email không tồn tại" });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = otp;
     user.otpExpires = new Date(Date.now() + 15 * 60 * 1000);
     await user.save();
 
-    console.log("ForgotPassword: Generated OTP:", otp, "for:", email, "Expires:", user.otpExpires);
-
-    try {
-      await sendOTP(email, otp);
-      console.log("ForgotPassword: OTP sent to:", email);
-    } catch (emailError) {
-      console.error("ForgotPassword: Failed to send OTP:", emailError.message);
-      user.otp = null;
-      user.otpExpires = null;
-      await user.save();
-      return res.status(500).json({ message: "Không thể gửi OTP, vui lòng thử lại sau" });
-    }
+    await sendOTP(email, otp);
 
     res.status(200).json({ message: "OTP đã gửi qua email" });
   } catch (error) {
-    console.error("ForgotPassword: Error:", error.message, error.stack);
+    console.error("Forgot password error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
@@ -232,59 +161,38 @@ const forgotPassword = async (req, res) => {
 const resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    console.log("ResetPassword: Request:", { email, otp });
-
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: "Email, OTP, và mật khẩu mới là bắt buộc" });
     }
 
     const user = await User.findOne({ email });
-    if (!user) {
-      console.log("ResetPassword: Email not found:", email);
-      return res.status(400).json({ message: "Email không tồn tại" });
-    }
+    if (!user) return res.status(400).json({ message: "Email không tồn tại" });
 
-    const currentTime = new Date();
-    console.log("ResetPassword: Stored OTP:", user.otp, "Received OTP:", otp, "Expires:", user.otpExpires, "Current Time:", currentTime);
-    if (!user.otp || String(user.otp) !== String(otp) || user.otpExpires < currentTime) {
+    if (user.otp !== otp || user.otpExpires < new Date()) {
       return res.status(401).json({ message: "OTP không hợp lệ hoặc đã hết hạn" });
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await User.updateOne(
-      { email },
-      {
-        $set: {
-          password: hashedPassword,
-          otp: null,
-          otpExpires: null,
-        },
-      }
-    );
+    user.password = newPassword;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
 
-    console.log("ResetPassword: Password updated for:", email);
     res.status(200).json({ message: "Mật khẩu đã được cập nhật thành công" });
   } catch (error) {
-    console.error("ResetPassword: Error:", error.message, error.stack);
+    console.error("Reset password error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
 
 const updateAvatar = async (req, res) => {
   try {
-    const userId = req.user._id;
     const file = req.file;
-
-    if (!file) {
-      return res.status(400).json({ message: "Vui lòng upload file avatar" });
-    }
+    if (!file) return res.status(400).json({ message: "Vui lòng upload file avatar" });
 
     const avatarUrl = `/Uploads/${file.filename}`;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "Người dùng không tồn tại" });
-    }
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
 
     user.avatar = avatarUrl;
     await user.save();
@@ -300,15 +208,12 @@ const updateAvatar = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("UpdateAvatar: Error:", error.message, error.stack);
-    if (error.code === "ENOENT") {
-      return res.status(500).json({ message: "Thư mục uploads không tồn tại hoặc không có quyền ghi" });
-    }
+    console.error("Update avatar error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
 
-const logout = async (req, res, io) => {
+const logout = async (req, res) => {
   try {
     const userId = req.user._id;
 
@@ -318,22 +223,58 @@ const logout = async (req, res, io) => {
       await user.save();
     }
 
-    io.emit("user-status-changed", {
-      userId: userId,
-      isOnline: false,
-    });
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("user-status-changed", { userId, isOnline: false });
+    }
 
     res.clearCookie("refreshToken");
     res.status(200).json({ message: "Đăng xuất thành công" });
   } catch (error) {
-    console.error("Logout: Error:", error.message, error.stack);
+    console.error("Logout error:", error.message);
     res.status(500).json({ message: "Lỗi server" });
   }
 };
 
 const searchUsers = async (req, res) => {
   try {
-    const { query, boardId } = req.query;
+    const { query, boardId, onlyActiveMembers } = req.query;
+    console.log("SearchUsers called with:", { query, boardId, onlyActiveMembers, userId: req.user._id });
+
+    if (onlyActiveMembers === "true" && boardId) {
+      if (!mongoose.Types.ObjectId.isValid(boardId)) {
+        return res.status(400).json({ message: "boardId không hợp lệ!" });
+      }
+
+      const board = await Board.findById(boardId).populate(
+        "members.user",
+        "_id email fullName avatar isOnline"
+      );
+      console.log("Board:", board);
+      if (!board) {
+        return res.status(404).json({ message: "Bảng không tồn tại!" });
+      }
+
+      // Kiểm tra cả owner và members
+      const isOwner = board.owner.toString() === req.user._id.toString();
+      const isMember = board.members.some(
+        (m) => m.user.toString() === req.user._id.toString() && m.isActive
+      );
+      if (!isOwner && !isMember) {
+        console.log("Access denied - User is neither owner nor active member");
+        return res.status(403).json({ message: "Bạn không có quyền truy cập bảng này!" });
+      }
+
+      const users = board.members
+        .filter((m) => m.isActive)
+        .map((m) => ({
+          ...m.user.toObject(),
+          isPastMember: false,
+        }));
+
+      return res.status(200).json({ users });
+    }
+
     if (!query) {
       return res.status(400).json({ message: "Query là bắt buộc!" });
     }
@@ -348,28 +289,25 @@ const searchUsers = async (req, res) => {
     let pastMembers = [];
     if (boardId) {
       if (!mongoose.Types.ObjectId.isValid(boardId)) {
-        console.warn("SearchUsers: Invalid boardId:", boardId);
         return res.status(400).json({ message: "boardId không hợp lệ!" });
       }
 
       const board = await Board.findById(boardId);
       if (!board) {
-        console.warn("SearchUsers: Board not found for boardId:", boardId);
         return res.status(404).json({ message: "Bảng không tồn tại!" });
       }
 
-      // Kiểm tra quyền truy cập
-      const userId = req.user._id.toString();
+      const isOwner = board.owner.toString() === req.user._id.toString();
       const isMember = board.members.some(
-        (m) => m.user && m.user.toString() === userId && m.isActive
+        (m) => m.user.toString() === req.user._id.toString() && m.isActive
       );
-      if (!isMember) {
-        console.warn("SearchUsers: User not authorized for board:", { userId, boardId });
+      if (!isOwner && !isMember) {
+        console.log("Access denied - User is neither owner nor active member");
         return res.status(403).json({ message: "Bạn không có quyền truy cập bảng này!" });
       }
 
       pastMembers = board.members
-        .filter((m) => m.user && !m.isActive)
+        .filter((m) => !m.isActive)
         .map((m) => m.user.toString());
     }
 
@@ -378,11 +316,10 @@ const searchUsers = async (req, res) => {
       isPastMember: pastMembers.includes(user._id.toString()),
     }));
 
-    console.log("SearchUsers: Success", { query, boardId, userCount: enrichedUsers.length });
     res.status(200).json({ users: enrichedUsers });
-  } catch (err) {
-    console.error("SearchUsers: Error:", err.message, err.stack);
-    res.status(500).json({ message: "Lỗi server", error: err.message });
+  } catch (error) {
+    console.error("Search users error:", error.message);
+    res.status(500).json({ message: "Lỗi server" });
   }
 };
 
@@ -391,10 +328,10 @@ module.exports = {
   verifyOTP,
   login,
   getProfile,
+  refreshToken,
   forgotPassword,
   resetPassword,
   updateAvatar,
-  refreshToken,
   logout,
   searchUsers,
 };

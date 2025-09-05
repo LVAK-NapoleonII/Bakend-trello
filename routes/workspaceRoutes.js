@@ -5,6 +5,11 @@ const {
   getWorkspaceById,
   updateWorkspace,
   deleteWorkspace,
+  getDeletedWorkspaces,
+  restoreWorkspace,
+  leaveWorkspace,
+  getPublicWorkspaces,
+  joinWorkspace,
 } = require("../controllers/workspaceController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const workspaceMiddleware = require("../middlewares/workspaceMiddleware");
@@ -143,6 +148,88 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.get("/", authMiddleware, getWorkspaces);
+
+  /**
+   * @swagger
+   * /api/workspaces/public:
+   *   get:
+   *     summary: Lấy danh sách các workspace công khai
+   *     tags: [Workspaces]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - name: search
+   *         in: query
+   *         schema:
+   *           type: string
+   *         description: Tìm kiếm workspace theo tên
+   *     responses:
+   *       200:
+   *         description: Danh sách workspace công khai
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Workspace'
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       500:
+   *         description: Lỗi server
+   */
+  router.get("/public", authMiddleware, getPublicWorkspaces);
+
+  /**
+   * @swagger
+   * /api/workspaces/deleted:
+   *   get:
+   *     summary: Lấy danh sách các workspace đã bị xóa của người dùng (chỉ dành cho owner)
+   *     tags: [Workspaces]
+   *     security:
+   *       - BearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Danh sách các workspace đã bị xóa
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 type: object
+   *                 properties:
+   *                   _id:
+   *                     type: string
+   *                   name:
+   *                     type: string
+   *                   description:
+   *                     type: string
+   *                   background:
+   *                     type: string
+   *                   isPublic:
+   *                     type: boolean
+   *                   owner:
+   *                     type: object
+   *                     properties:
+   *                       email:
+   *                         type: string
+   *                       fullName:
+   *                         type: string
+   *                       avatar:
+   *                         type: string
+   *                   members:
+   *                     type: array
+   *                     items:
+   *                       type: string
+   *                   activities:
+   *                     type: array
+   *                     items:
+   *                       type: object
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       500:
+   *         description: Lỗi server
+   */
+  router.get("/deleted", authMiddleware, getDeletedWorkspaces);
 
   /**
    * @swagger
@@ -299,11 +386,134 @@ module.exports = (io) => {
     (req, res) => updateWorkspace(req, res, io)
   );
 
- /**
+  /**
+   * @swagger
+   * /api/workspaces/{id}:
+   *   delete:
+   *     summary: Ẩn workspace
+   *     tags: [Workspaces]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - name: id
+   *         in: path
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của workspace
+   *     responses:
+   *       200:
+   *         description: Đã ẩn workspace
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                   example: "Đã ẩn workspace"
+   *       400:
+   *         description: Workspace ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền ẩn
+   *       404:
+   *         description: Không tìm thấy workspace
+   *       500:
+   *         description: Lỗi server
+   */
+  router.delete(
+    "/:id",
+    authMiddleware,
+    workspaceMiddleware,
+    activityMiddleware("workspace_hidden", "Workspace", (req) => `User ${req.user.fullName} hid workspace`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã ẩn workspace`,
+      "activity",
+      "Workspace"
+    ),
+    (req, res) => deleteWorkspace(req, res, io)
+  );
+
+  /**
+   * @swagger
+   * /api/workspaces/{id}/restore:
+   *   post:
+   *     summary: Khôi phục workspace đã bị xóa
+   *     tags: [Workspaces]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - name: id
+   *         in: path
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của workspace
+   *     responses:
+   *       200:
+   *         description: Đã khôi phục workspace
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                   example: "Đã khôi phục workspace"
+   *                 workspace:
+   *                   type: object
+   *                   properties:
+   *                     _id:
+   *                       type: string
+   *                     name:
+   *                       type: string
+   *                     description:
+   *                       type: string
+   *                     background:
+   *                       type: string
+   *                     isPublic:
+   *                       type: boolean
+   *                     owner:
+   *                       type: string
+   *                     members:
+   *                       type: array
+   *                       items:
+   *                         type: string
+   *                     activities:
+   *                       type: array
+   *                       items:
+   *                         type: string
+   *       400:
+   *         description: Workspace ID không hợp lệ hoặc workspace chưa bị xóa
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền khôi phục
+   *       404:
+   *         description: Không tìm thấy workspace
+   *       500:
+   *         description: Lỗi server
+   */
+  router.post(
+    "/:id/restore",
+    authMiddleware,
+    workspaceMiddleware,
+    activityMiddleware("workspace_restored", "Workspace", (req) => `User ${req.user.fullName} restored workspace`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã khôi phục workspace`,
+      "activity",
+      "Workspace"
+    ),
+    (req, res) => restoreWorkspace(req, res, io)
+  );
+
+  /**
  * @swagger
- * /api/workspaces/{id}:
- *   delete:
- *     summary: Ẩn workspace
+ * /api/workspaces/{id}/leave:
+ *   post:
+ *     summary: Rời khỏi một workspace
  *     tags: [Workspaces]
  *     security:
  *       - BearerAuth: []
@@ -316,7 +526,7 @@ module.exports = (io) => {
  *         description: ID của workspace
  *     responses:
  *       200:
- *         description: Đã ẩn workspace
+ *         description: Đã rời workspace thành công
  *         content:
  *           application/json:
  *             schema:
@@ -324,29 +534,81 @@ module.exports = (io) => {
  *               properties:
  *                 message:
  *                   type: string
- *                   example: "Đã ẩn workspace"
+ *                   example: "Đã rời workspace thành công"
  *       400:
  *         description: Workspace ID không hợp lệ
  *       401:
- *         description: Không có token hoặc token không hợp lệ
+ *         description: Không tìm thấy thông tin user
  *       403:
- *         description: Không có quyền ẩn
+ *         description: Owner không thể rời workspace hoặc không phải thành viên
  *       404:
  *         description: Không tìm thấy workspace
  *       500:
  *         description: Lỗi server
  */
-router.delete(
-  "/:id",
+router.post(
+  "/:id/leave",
   authMiddleware,
   workspaceMiddleware,
-  activityMiddleware("workspace_hidden", "Workspace", (req) => `User ${req.user.fullName} hid workspace`), // Cập nhật action
+  activityMiddleware("workspace_left", "Workspace", (req) => `User ${req.user.fullName} left workspace`),
   notificationMiddleware(
-    (req) => `${req.user.fullName} đã ẩn workspace`, // Cập nhật thông điệp
+    (req) => `${req.user.fullName} đã rời workspace`,
     "activity",
     "Workspace"
   ),
-  (req, res) => deleteWorkspace(req, res, io)
+  (req, res) => leaveWorkspace(req, res, io)
+);
+
+/**
+ * @swagger
+ * /api/workspaces/{id}/join:
+ *   post:
+ *     summary: Tham gia một workspace công khai
+ *     tags: [Workspaces]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - name: id
+ *         in: path
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của workspace
+ *     responses:
+ *       200:
+ *         description: Đã tham gia workspace thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Đã tham gia workspace thành công"
+ *                 workspace:
+ *                   $ref: '#/components/schemas/Workspace'
+ *       400:
+ *         description: Workspace ID không hợp lệ hoặc đã là thành viên
+ *       401:
+ *         description: Không tìm thấy thông tin user
+ *       403:
+ *         description: Workspace không phải công khai
+ *       404:
+ *         description: Không tìm thấy workspace
+ *       500:
+ *         description: Lỗi server
+ */
+router.post(
+  "/:id/join",
+  authMiddleware,
+  workspaceMiddleware,
+  activityMiddleware("workspace_joined", "Workspace", (req) => `User ${req.user.fullName} joined workspace`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã tham gia workspace`,
+    "activity",
+    "Workspace"
+  ),
+  joinWorkspace
 );
 
   return router;

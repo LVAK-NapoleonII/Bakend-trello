@@ -3,219 +3,459 @@ const Workspace = require("../models/Workspace");
 const Board = require("../models/Board");
 const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
-const User = require("../models/User");
 
-exports.createWorkspace = async (req, res, io) => {
+const createWorkspace = async (req, res) => {
   try {
     const { name, description, background, isPublic } = req.body;
-
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
-
-    if (!name) {
-      return res.status(400).json({ message: "Tên workspace là bắt buộc!" });
-    }
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!name) return res.status(400).json({ message: "Tên workspace là bắt buộc!" });
 
     const workspace = await Workspace.create({
       name,
-      description,
+      description: description || "",
       background: background || "#ffffff",
       isPublic: isPublic || false,
-      owner: req.user._id,
-      members: [req.user._id],
+      owner: userId,
+      members: [userId],
       isDeleted: false,
     });
 
-    // Phát sự kiện đến tất cả thành viên workspace
-    workspace.members.forEach((memberId) => {
-      io.to(memberId.toString()).emit("workspace-created", {
-        workspace,
-        message: `Workspace "${name}" đã được tạo bởi ${req.user.fullName}`,
-      });
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "created" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} created workspace "${name}"`,
     });
+    await activity.save();
+    workspace.activities.push(activity._id);
+    await workspace.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      workspace.members.forEach((memberId) =>
+        io.to(memberId.toString()).emit("workspace-created", {
+          workspace,
+          message: `Workspace "${name}" đã được tạo bởi ${req.user.fullName}`,
+        })
+      );
+    }
 
     res.status(201).json(workspace);
   } catch (error) {
-    console.error("Error in createWorkspace:", error.message, error.stack);
+    console.error("createWorkspace error:", error.message);
     res.status(500).json({ message: "Lỗi tạo workspace", error: error.message });
   }
 };
 
-exports.getWorkspaces = async (req, res) => {
+const getWorkspaces = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
 
     const workspaces = await Workspace.find({
-      members: req.user._id,
+      members: userId,
       isDeleted: false,
     })
       .populate("owner", "email fullName avatar")
-      .populate("activities");
+      .populate("activities")
+      .lean(); // Use lean() for better performance
 
     res.status(200).json(workspaces);
   } catch (error) {
-    console.error("Error in getWorkspaces:", error.message, error.stack);
+    console.error("getWorkspaces error:", error.message);
     res.status(500).json({ message: "Lỗi lấy danh sách workspace", error: error.message });
   }
 };
 
-exports.getWorkspaceById = async (req, res) => {
+const getWorkspaceById = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      console.log("No user found in req.user");
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
+    const { id } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
 
-    console.log("User ID:", req.user._id.toString(), "Email:", req.user.email);
-
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      console.log("Invalid workspace ID:", req.params.id);
-      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
-    }
-
-    const workspace = await Workspace.findOne({ _id: req.params.id, isDeleted: false })
+    const workspace = await Workspace.findOne({ _id: id, isDeleted: false })
       .populate("owner", "email fullName avatar")
       .populate("members", "email fullName avatar")
-      .populate("activities");
+      .populate("activities")
+      .lean();
 
-    if (!workspace) {
-      console.log("Workspace not found for ID:", req.params.id);
-      return res.status(404).json({ message: "Không tìm thấy workspace!" });
-    }
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
 
-    console.log("Workspace:", {
-      id: workspace._id.toString(),
-      owner: workspace.owner.toString(),
-      members: workspace.members.map((m) => m._id.toString()),
-      isPublic: workspace.isPublic,
-    });
-
-    // So sánh ObjectId bằng toString()
-    const userIdStr = req.user._id.toString();
-    const isMember = workspace.members.some((member) => member._id.toString() === userIdStr);
+    const isMember = workspace.members.some((member) => member._id.toString() === userId.toString());
     if (!isMember && !workspace.isPublic) {
-      console.log("Access denied for user:", userIdStr, "Members:", workspace.members.map((m) => m._id.toString()));
       return res.status(403).json({ message: "Bạn không có quyền truy cập workspace này!" });
     }
 
     res.status(200).json(workspace);
   } catch (error) {
-    console.error("Error in getWorkspaceById:", error.message, error.stack);
+    console.error("getWorkspaceById error:", error.message);
     res.status(500).json({ message: "Lỗi lấy chi tiết workspace", error: error.message });
   }
 };
 
-exports.updateWorkspace = async (req, res, io) => {
+const updateWorkspace = async (req, res) => {
   try {
+    const { id } = req.params;
     const { name, description, background, isPublic } = req.body;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
 
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
-    }
-
-    const workspace = await Workspace.findOne({ _id: req.params.id, isDeleted: false });
-    if (!workspace) {
-      return res.status(404).json({ message: "Không tìm thấy workspace!" });
-    }
-
-    if (workspace.owner.toString() !== req.user._id.toString()) {
+    const workspace = await Workspace.findOne({ _id: id, isDeleted: false });
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    if (workspace.owner.toString() !== userId.toString()) {
       return res.status(403).json({ message: "Chỉ owner mới có quyền cập nhật workspace!" });
     }
 
-    if ("name" in req.body) workspace.name = name;
-    if ("description" in req.body) workspace.description = description;
-    if ("background" in req.body) workspace.background = background;
-    if ("isPublic" in req.body) workspace.isPublic = isPublic;
+    if (name) workspace.name = name;
+    if (description !== undefined) workspace.description = description;
+    if (background) workspace.background = background;
+    if (isPublic !== undefined) workspace.isPublic = isPublic;
 
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "updated" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} updated workspace "${workspace.name}"`,
+    });
+    await activity.save();
+    workspace.activities.push(activity._id);
     await workspace.save();
 
-    if (req.activityData) {
-      const { action, targetModel, details, userId } = req.activityData;
-      if (action === "workspace_updated" && targetModel === "Workspace") {
-        const activity = new Activity({
-          user: userId,
-          action,
-          target: workspace._id,
-          targetModel,
-          details,
+    const io = req.app.get("io");
+    if (io) {
+      const notificationPromises = workspace.members
+        .filter((memberId) => memberId.toString() !== userId.toString())
+        .map((memberId) => {
+          const notification = new Notification({
+            user: memberId,
+            message: `${req.user.fullName} đã cập nhật workspace "${workspace.name}"`,
+            type: "activity",
+            target: workspace._id,
+            targetModel: "Workspace",
+            isRead: false,
+            isHidden: false,
+          });
+          return notification.save().then(() => io.to(memberId.toString()).emit("new-notification", notification));
         });
-        await activity.save();
-        console.log("Activity saved:", activity);
+      await Promise.all(notificationPromises);
 
-        workspace.activities.push(activity._id);
-        await workspace.save();
-      }
+      io.to(workspace._id.toString()).emit("workspace-updated", {
+        workspace,
+        message: `Workspace "${workspace.name}" đã được cập nhật bởi ${req.user.fullName}`,
+      });
     }
-
-    for (const memberId of workspace.members) {
-      if (memberId.toString() !== req.user._id.toString()) {
-        const notification = new Notification({
-          user: memberId,
-          message: `${req.user.fullName} đã cập nhật workspace "${workspace.name}"`,
-          type: "activity",
-          target: workspace._id,
-          targetModel: "Workspace",
-        });
-        await notification.save();
-        io.to(memberId.toString()).emit("new-notification", notification);
-      }
-    }
-
-    io.to(workspace._id.toString()).emit("workspace-updated", {
-      workspace,
-      message: `Workspace "${workspace.name}" đã được cập nhật bởi ${req.user.fullName}`,
-    });
 
     res.status(200).json(workspace);
   } catch (error) {
-    console.error("Error in updateWorkspace:", error.message, error.stack);
+    console.error("updateWorkspace error:", error.message);
     res.status(500).json({ message: "Lỗi cập nhật workspace", error: error.message });
   }
 };
 
-exports.deleteWorkspace = async (req, res, io) => {
+const deleteWorkspace = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    }
+    const { id } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
 
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
-    }
-
-    const workspace = await Workspace.findById(req.params.id);
-    if (!workspace) {
-      return res.status(404).json({ message: "Không tìm thấy workspace!" });
-    }
-
-    if (workspace.owner.toString() !== req.user._id.toString()) {
+    const workspace = await Workspace.findById(id);
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    if (workspace.owner.toString() !== userId.toString()) {
       return res.status(403).json({ message: "Chỉ owner mới có quyền ẩn workspace!" });
     }
 
-    // Đánh dấu tất cả board trong workspace là đã xóa
-    await Board.updateMany({ workspace: workspace._id }, { $set: { isDeleted: true } });
-
+    await Board.updateMany({ workspace: id }, { $set: { isDeleted: true } });
     workspace.isDeleted = true;
     await workspace.save();
 
-    // Phát sự kiện workspace-hidden đến tất cả thành viên
-    workspace.members.forEach((memberId) => {
-      io.to(memberId.toString()).emit("workspace-hidden", {
-        workspaceId: req.params.id,
-        message: `Workspace "${workspace.name}" đã bị ẩn bởi ${req.user.fullName}`,
-      });
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "deleted" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} deleted workspace "${workspace.name}"`,
     });
+    await activity.save();
+    workspace.activities.push(activity._id);
+    await workspace.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      workspace.members.forEach((memberId) =>
+        io.to(memberId.toString()).emit("workspace-hidden", {
+          workspaceId: id,
+          message: `Workspace "${workspace.name}" đã bị ẩn bởi ${req.user.fullName}`,
+        })
+      );
+    }
 
     res.status(200).json({ message: "Đã ẩn workspace" });
   } catch (error) {
-    console.error("Error in deleteWorkspace:", error.message, error.stack);
+    console.error("deleteWorkspace error:", error.message);
     res.status(500).json({ message: "Lỗi ẩn workspace", error: error.message });
   }
+};
+
+const getDeletedWorkspaces = async (req, res) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+
+    const workspaces = await Workspace.find({
+      owner: userId,
+      isDeleted: true,
+    })
+      .populate("owner", "email fullName avatar")
+      .populate("activities")
+      .lean();
+
+    res.status(200).json(workspaces);
+  } catch (error) {
+    console.error("getDeletedWorkspaces error:", error.message);
+    res.status(500).json({ message: "Lỗi lấy danh sách workspace bị xóa", error: error.message });
+  }
+};
+
+const restoreWorkspace = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?._id;
+    console.log("Restoring workspace:", { id, userId, body: req.body });
+
+    if (!userId) {
+      console.log("Missing user info");
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.log("Invalid workspace ID:", id);
+      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+    }
+
+    const workspace = await Workspace.findById(id);
+    if (!workspace) {
+      console.log("Workspace not found:", id);
+      return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    }
+    if (workspace.owner.toString() !== userId.toString()) {
+      console.log("User is not owner:", { userId, owner: workspace.owner });
+      return res.status(403).json({ message: "Chỉ owner mới có quyền khôi phục workspace!" });
+    }
+    if (!workspace.isDeleted) {
+      console.log("Workspace is not deleted:", id);
+      return res.status(400).json({ message: "Workspace này chưa bị xóa!" });
+    }
+
+    console.log("Updating boards for workspace:", id);
+    await Board.updateMany({ workspace: id }, { $set: { isDeleted: false } });
+    console.log("Setting workspace isDeleted to false");
+    workspace.isDeleted = false;
+    await workspace.save();
+    console.log("Workspace restored:", id);
+
+    console.log("Creating activity for restore");
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "restored" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} restored workspace "${workspace.name}"`,
+    });
+    await activity.save();
+    workspace.activities.push(activity._id);
+    await workspace.save();
+    console.log("Activity saved and added to workspace");
+
+    const io = req.app.get("io");
+    if (io) {
+      console.log("Sending Socket.IO notifications");
+      const notificationPromises = workspace.members
+        .filter((memberId) => memberId.toString() !== userId.toString())
+        .map((memberId) => {
+          const notification = new Notification({
+            user: memberId,
+            message: `${req.user.fullName} đã khôi phục workspace "${workspace.name}"`,
+            type: "activity",
+            target: workspace._id,
+            targetModel: "Workspace",
+            isRead: false,
+            isHidden: false,
+          });
+          return notification.save().then(() => {
+            console.log(`Emitting notification to member: ${memberId}`);
+            io.to(memberId.toString()).emit("new-notification", notification);
+          });
+        });
+      await Promise.all(notificationPromises);
+
+      workspace.members.forEach((memberId) => {
+        console.log(`Emitting workspace-restored to member: ${memberId}`);
+        io.to(memberId.toString()).emit("workspace-restored", {
+          workspace,
+          message: `Workspace "${workspace.name}" đã được khôi phục bởi ${req.user.fullName}`,
+        });
+      });
+    } else {
+      console.warn("Socket.IO not initialized");
+    }
+
+    res.status(200).json({ message: "Đã khôi phục workspace", workspace });
+  } catch (error) {
+    console.error("restoreWorkspace error:", error.message, error.stack);
+    res.status(500).json({ message: "Lỗi khôi phục workspace", error: error.message });
+  }
+};
+
+const leaveWorkspace = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+
+    const workspace = await Workspace.findById(id);
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    if (workspace.owner.toString() === userId.toString()) {
+      return res.status(403).json({ message: "Owner không thể rời workspace!" });
+    }
+
+    const isMember = workspace.members.includes(userId);
+    if (!isMember) return res.status(403).json({ message: "Bạn không phải thành viên của workspace này!" });
+
+    workspace.members = workspace.members.filter((member) => member.toString() !== userId.toString());
+
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "left" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} left workspace "${workspace.name}"`,
+    });
+    await activity.save();
+    workspace.activities.push(activity._id);
+
+    await workspace.save();
+
+    await Board.updateMany(
+      { workspace: id, "members.user": userId },
+      { $pull: { members: { user: userId } } }
+    );
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(userId.toString()).emit("workspace-left", {
+        workspaceId: id,
+        message: `Bạn đã rời workspace "${workspace.name}"`,
+      });
+
+      workspace.members.forEach((memberId) => {
+        if (memberId.toString() !== userId.toString()) {
+          io.to(memberId.toString()).emit("member-left-workspace", {
+            workspaceId: id,
+            userId,
+            message: `${req.user.fullName} đã rời workspace "${workspace.name}"`,
+          });
+        }
+      });
+    }
+
+    res.status(200).json({ message: "Đã rời workspace thành công" });
+  } catch (error) {
+    console.error("leaveWorkspace error:", error.message);
+    res.status(500).json({ message: "Lỗi rời workspace" });
+  }
+};
+
+const getPublicWorkspaces = async (req, res) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+
+    const { search } = req.query;
+    const query = {
+      isPublic: true,
+      isDeleted: false,
+    };
+
+    if (search) {
+      query.name = { $regex: search, $options: "i" }; // Case-insensitive search
+    }
+
+    const workspaces = await Workspace.find(query)
+      .populate("owner", "email fullName avatar")
+      .lean();
+
+    res.status(200).json(workspaces);
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi lấy danh sách workspace công khai", error: error.message });
+  }
+};
+
+const joinWorkspace = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+
+    const workspace = await Workspace.findById(id);
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    if (!workspace.isPublic) return res.status(403).json({ message: "Workspace này không phải công khai!" });
+    if (workspace.isDeleted) return res.status(404).json({ message: "Workspace đã bị xóa!" });
+
+    const isMember = workspace.members.includes(userId);
+    if (isMember) return res.status(400).json({ message: "Bạn đã là thành viên của workspace này!" });
+
+    workspace.members.push(userId);
+    const activity = new Activity({
+      user: userId,
+      action: { category: "workspace", type: "joined" },
+      target: workspace._id,
+      targetModel: "Workspace",
+      details: `User ${req.user.fullName} joined workspace "${workspace.name}"`,
+    });
+    await activity.save();
+    workspace.activities.push(activity._id);
+    await workspace.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(userId.toString()).emit("workspace-joined", {
+        workspace,
+        message: `Bạn đã tham gia workspace "${workspace.name}"`,
+      });
+
+      workspace.members.forEach((memberId) => {
+        if (memberId.toString() !== userId.toString()) {
+          io.to(memberId.toString()).emit("member-joined-workspace", {
+            workspaceId: id,
+            userId,
+            message: `${req.user.fullName} đã tham gia workspace "${workspace.name}"`,
+          });
+        }
+      });
+    }
+
+    res.status(200).json({ message: "Đã tham gia workspace thành công", workspace });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi tham gia workspace", error: error.message });
+  }
+};
+
+module.exports = {
+  createWorkspace,
+  getWorkspaces,
+  getWorkspaceById,
+  updateWorkspace,
+  deleteWorkspace,
+  getDeletedWorkspaces,
+  restoreWorkspace,
+  leaveWorkspace,
+  getPublicWorkspaces,
+  joinWorkspace,
 };

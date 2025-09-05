@@ -9,14 +9,13 @@ const workspaceSchema = new mongoose.Schema(
     owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity" }],
+    joinRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     isDeleted: { type: Boolean, default: false },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// Thêm index để tối ưu truy vấn
+// Thêm index
 workspaceSchema.index({ members: 1 });
 workspaceSchema.index({ owner: 1 });
 workspaceSchema.index({ activities: 1 });

@@ -11,16 +11,109 @@ const {
   getBoardActivities,
   leaveBoard,
   transferOwnership,
+  getBoardsByWorkspace,
+  getWorkspaceMembers
 } = require("../controllers/boardController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const activityMiddleware = require("../middlewares/activityMiddleware");
 const notificationMiddleware = require("../middlewares/notificationMiddleware");
 
-module.exports = (io) => {
+module.exports = () => {
   const router = express.Router();
 
   /**
    * @swagger
+   * components:
+   *   schemas:
+   *     Board:
+   *       type: object
+   *       properties:
+   *         _id:
+   *           type: string
+   *         title:
+   *           type: string
+   *         description:
+   *           type: string
+   *         background:
+   *           type: string
+   *         visibility:
+   *           type: string
+   *           enum: [public, private]
+   *         owner:
+   *           $ref: '#/components/schemas/UserBasic'
+   *         workspace:
+   *           type: object
+   *           properties:
+   *             _id:
+   *               type: string
+   *             name:
+   *               type: string
+   *         members:
+   *           type: array
+   *           items:
+   *             type: object
+   *             properties:
+   *               user:
+   *                 $ref: '#/components/schemas/User'
+   *               isActive:
+   *                 type: boolean
+   *         invitedUsers:
+   *           type: array
+   *           items:
+   *             type: object
+   *             properties:
+   *               user:
+   *                 $ref: '#/components/schemas/User'
+   *               email:
+   *                 type: string
+   *               isActive:
+   *                 type: boolean
+   *               invitedAt:
+   *                 type: string
+   *                 format: date-time
+   *         isDeleted:
+   *           type: boolean
+   *         createdAt:
+   *           type: string
+   *           format: date-time
+   *         updatedAt:
+   *           type: string
+   *           format: date-time
+   *     UserBasic:
+   *       type: object
+   *       properties:
+   *         _id:
+   *           type: string
+   *         email:
+   *           type: string
+   *         fullName:
+   *           type: string
+   *         isOnline:
+   *           type: boolean
+   *     BoardActivity:
+   *       type: object
+   *       properties:
+   *         _id:
+   *           type: string
+   *         user:
+   *           $ref: '#/components/schemas/UserBasic'
+   *         action:
+   *           type: object
+   *           properties:
+   *             category:
+   *               type: string
+   *             type:
+   *               type: string
+   *         target:
+   *           type: string
+   *         targetModel:
+   *           type: string
+   *         details:
+   *           type: string
+   *         createdAt:
+   *           type: string
+   *           format: date-time
+   *
    * tags:
    *   name: Boards
    *   description: Quản lý bảng làm việc
@@ -46,9 +139,12 @@ module.exports = (io) => {
    *             properties:
    *               title:
    *                 type: string
+   *                 minLength: 1
+   *                 maxLength: 100
    *                 example: "My New Board"
    *               description:
    *                 type: string
+   *                 maxLength: 500
    *                 example: "A board for project management"
    *               background:
    *                 type: string
@@ -67,58 +163,13 @@ module.exports = (io) => {
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 description:
-   *                   type: string
-   *                 background:
-   *                   type: string
-   *                 visibility:
-   *                   type: string
-   *                 owner:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
-   *                 workspace:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     name:
-   *                       type: string
-   *                 members:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       user:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
-   *                           isOnline:
-   *                             type: boolean
-   *                       isActive:
-   *                         type: boolean
+   *               $ref: '#/components/schemas/Board'
    *       400:
    *         description: Thiếu title, workspace hoặc workspace ID không hợp lệ
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ApiResponse'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       403:
@@ -132,7 +183,7 @@ module.exports = (io) => {
     "/",
     authMiddleware,
     activityMiddleware("board_created", "Board", (req) => `User ${req.user.fullName} created board "${req.body.title}"`),
-    (req, res) => createBoard(req, res, io)
+    createBoard
   );
 
   /**
@@ -154,56 +205,7 @@ module.exports = (io) => {
    *                 boards:
    *                   type: array
    *                   items:
-   *                     type: object
-   *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       title:
-   *                         type: string
-   *                       description:
-   *                         type: string
-   *                       background:
-   *                         type: string
-   *                       visibility:
-   *                         type: string
-   *                       owner:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           isOnline:
-   *                             type: boolean
-   *                       workspace:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           name:
-   *                             type: string
-   *                       members:
-   *                         type: array
-   *                         items:
-   *                           type: object
-   *                           properties:
-   *                             user:
-   *                               type: object
-   *                               properties:
-   *                                 _id:
-   *                                   type: string
-   *                                 email:
-   *                                   type: string
-   *                                 fullName:
-   *                                   type: string
-   *                                 avatar:
-   *                                   type: string
-   *                                 isOnline:
-   *                                   type: boolean
-   *                             isActive:
-   *                               type: boolean
+   *                     $ref: '#/components/schemas/Board'
    *       401:
    *         description: Không có token hoặc token không hợp lệ
    *       500:
@@ -226,88 +228,22 @@ module.exports = (io) => {
    *         required: true
    *         schema:
    *           type: string
+   *           example: "507f1f77bcf86cd799439011"
    *     responses:
    *       200:
    *         description: Thông tin chi tiết bảng
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 description:
-   *                   type: string
-   *                 background:
-   *                   type: string
-   *                 visibility:
-   *                   type: string
-   *                 owner:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
-   *                 workspace:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     name:
-   *                       type: string
-   *                 members:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       user:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
-   *                           isOnline:
-   *                             type: boolean
-   *                       isActive:
-   *                         type: boolean
-   *                 invitedUsers:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       user:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
-   *                           isOnline:
-   *                             type: boolean
-   *                       isActive:
-   *                         type: boolean
+   *               $ref: '#/components/schemas/Board'
+   *       400:
+   *         description: Board ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không có quyền truy cập bảng
    *       404:
    *         description: Không tìm thấy bảng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
@@ -328,6 +264,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
    *     requestBody:
    *       required: true
    *       content:
@@ -337,9 +274,12 @@ module.exports = (io) => {
    *             properties:
    *               title:
    *                 type: string
+   *                 minLength: 1
+   *                 maxLength: 100
    *                 example: "Updated Board Title"
    *               description:
    *                 type: string
+   *                 maxLength: 500
    *                 example: "Updated description"
    *               background:
    *                 type: string
@@ -353,82 +293,33 @@ module.exports = (io) => {
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 description:
-   *                   type: string
-   *                 background:
-   *                   type: string
-   *                 visibility:
-   *                   type: string
-   *                 owner:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     email:
-   *                       type: string
-   *                     fullName:
-   *                       type: string
-   *                     isOnline:
-   *                       type: boolean
-   *                 workspace:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     name:
-   *                       type: string
-   *                 members:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       user:
-   *                         type: object
-   *                         properties:
-   *                           _id:
-   *                             type: string
-   *                           email:
-   *                             type: string
-   *                           fullName:
-   *                             type: string
-   *                           avatar:
-   *                             type: string
-   *                           isOnline:
-   *                             type: boolean
-   *                       isActive:
-   *                         type: boolean
+   *               $ref: '#/components/schemas/Board'
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không có quyền cập nhật bảng
    *       404:
    *         description: Không tìm thấy bảng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
   router.put(
     "/:id",
     authMiddleware,
-    activityMiddleware("board_updated", "Board", (req) => `User ${req.user.fullName} updated board "${req.body.title || 'unknown'}"`),
+    activityMiddleware("board_updated", "board", "Board", (req) => `User ${req.user.fullName} updated board "${req.body.title || 'unknown'}"`),
     notificationMiddleware(
       (req) => `${req.user.fullName} đã cập nhật board "${req.body.title || 'unknown'}"`,
       "activity",
       "Board"
     ),
-    (req, res) => updateBoard(req, res, io)
+    updateBoard
   );
 
   /**
    * @swagger
    * /api/boards/{id}:
    *   delete:
-   *     summary: Ẩn bảng
+   *     summary: Ẩn bảng (soft delete)
    *     tags: [Boards]
    *     security:
    *       - BearerAuth: []
@@ -439,6 +330,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID bảng cần ẩn
+   *         example: "507f1f77bcf86cd799439011"
    *     responses:
    *       200:
    *         description: Ẩn bảng thành công
@@ -450,12 +342,12 @@ module.exports = (io) => {
    *                 message:
    *                   type: string
    *                   example: "Đã ẩn bảng thành công"
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Chỉ chủ phòng mới có quyền xóa
    *       404:
    *         description: Không tìm thấy bảng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
@@ -463,7 +355,7 @@ module.exports = (io) => {
     "/:id",
     authMiddleware,
     activityMiddleware("board_deleted", "Board", (req) => `User ${req.user.fullName} deleted board`),
-    (req, res) => deleteBoard(req, res, io)
+    deleteBoard
   );
 
   /**
@@ -481,6 +373,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của board (phải là ObjectId hợp lệ)
+   *         example: "507f1f77bcf86cd799439011"
    *     requestBody:
    *       required: true
    *       content:
@@ -509,6 +402,8 @@ module.exports = (io) => {
    *                   example: "Cập nhật thứ tự cột thành công"
    *       400:
    *         description: Board ID hoặc columnOrder không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không có quyền cập nhật board
    *       404:
@@ -520,7 +415,7 @@ module.exports = (io) => {
     "/:boardId/column-order",
     authMiddleware,
     activityMiddleware("column_order_updated", "Board", (req) => `User ${req.user.fullName} updated column order`),
-    (req, res) => updateColumnOrder(req, res, io)
+    updateColumnOrder
   );
 
   /**
@@ -538,6 +433,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
    *     requestBody:
    *       required: true
    *       content:
@@ -547,12 +443,16 @@ module.exports = (io) => {
    *             properties:
    *               email:
    *                 type: string
+   *                 format: email
    *                 description: Email của thành viên cần mời
    *                 example: "user@example.com"
    *               userId:
    *                 type: string
-   *                 description: ID của thành viên cần mời (tùy chọn, ưu tiên hơn email)
+   *                 description: ID của thành viên cần mời (ưu tiên hơn email nếu có)
    *                 example: "507f1f77bcf86cd799439011"
+   *             oneOf:
+   *               - required: [email]
+   *               - required: [userId]
    *     responses:
    *       200:
    *         description: Mời thành viên thành công
@@ -565,54 +465,11 @@ module.exports = (io) => {
    *                   type: string
    *                   example: "Đã mời thành viên thành công!"
    *                 board:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     title:
-   *                       type: string
-   *                     members:
-   *                       type: array
-   *                       items:
-   *                         type: object
-   *                         properties:
-   *                           user:
-   *                             type: object
-   *                             properties:
-   *                               _id:
-   *                                 type: string
-   *                               email:
-   *                                 type: string
-   *                               fullName:
-   *                                 type: string
-   *                               avatar:
-   *                                 type: string
-   *                               isOnline:
-   *                                 type: boolean
-   *                           isActive:
-   *                             type: boolean
-   *                     invitedUsers:
-   *                       type: array
-   *                       items:
-   *                         type: object
-   *                         properties:
-   *                           user:
-   *                             type: object
-   *                             properties:
-   *                               _id:
-   *                                 type: string
-   *                               email:
-   *                                 type: string
-   *                               fullName:
-   *                                 type: string
-   *                               avatar:
-   *                                 type: string
-   *                               isOnline:
-   *                                 type: boolean
-   *                           isActive:
-   *                             type: boolean
+   *                   $ref: '#/components/schemas/Board'
    *       400:
    *         description: Thiếu email/userId, user đã là thành viên, hoặc ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không có quyền mời thành viên (chỉ owner)
    *       404:
@@ -629,7 +486,7 @@ module.exports = (io) => {
       "activity",
       "Board"
     ),
-    (req, res) => inviteMember(req, res, io)
+    inviteMember
   );
 
   /**
@@ -647,12 +504,14 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
    *       - in: path
    *         name: userId
    *         required: true
    *         schema:
    *           type: string
    *         description: ID của thành viên cần vô hiệu hóa
+   *         example: "507f1f77bcf86cd799439012"
    *     responses:
    *       200:
    *         description: Vô hiệu hóa thành viên thành công
@@ -663,36 +522,18 @@ module.exports = (io) => {
    *               properties:
    *                 message:
    *                   type: string
-   *                   example: "Đã vô hiệu hóa thành viên trong bảng!"
+   *                   example: "Đã xóa thành viên khỏi bảng!"
    *                 board:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     title:
-   *                       type: string
-   *                     members:
-   *                       type: array
-   *                       items:
-   *                         type: object
-   *                         properties:
-   *                           user:
-   *                             type: object
-   *                             properties:
-   *                               _id:
-   *                                 type: string
-   *                               email:
-   *                                 type: string
-   *                               fullName:
-   *                                 type: string
-   *                               avatar:
-   *                                 type: string
-   *                               isOnline:
-   *                                 type: boolean
-   *                           isActive:
-   *                             type: boolean
+   *                   $ref: '#/components/schemas/Board'
+   *                 cardIds:
+   *                   type: array
+   *                   items:
+   *                     type: string
+   *                   description: Danh sách ID card bị ảnh hưởng
    *       400:
    *         description: ID không hợp lệ hoặc không thể xóa chủ phòng
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Chỉ chủ phòng mới có quyền xóa thành viên
    *       404:
@@ -709,7 +550,7 @@ module.exports = (io) => {
       "activity",
       "Board"
     ),
-    (req, res) => removeMember(req, res, io)
+    removeMember
   );
 
   /**
@@ -727,6 +568,14 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 50
+   *           maximum: 100
+   *         description: Số lượng hoạt động tối đa trả về
    *     responses:
    *       200:
    *         description: Danh sách hoạt động
@@ -735,38 +584,15 @@ module.exports = (io) => {
    *             schema:
    *               type: array
    *               items:
-   *                 type: object
-   *                 properties:
-   *                   _id:
-   *                     type: string
-   *                   user:
-   *                     type: object
-   *                     properties:
-   *                       _id:
-   *                         type: string
-   *                       email:
-   *                         type: string
-   *                       fullName:
-   *                         type: string
-   *                       isOnline:
-   *                         type: boolean
-   *                   action:
-   *                     type: string
-   *                   target:
-   *                     type: string
-   *                   targetModel:
-   *                     type: string
-   *                   details:
-   *                     type: string
-   *                   createdAt:
-   *                     type: string
-   *                     format: date-time
+   *                 $ref: '#/components/schemas/BoardActivity'
+   *       400:
+   *         description: Board ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không có quyền truy cập bảng
    *       404:
    *         description: Không tìm thấy bảng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
@@ -787,6 +613,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
    *     responses:
    *       200:
    *         description: Rời bảng thành công
@@ -799,40 +626,23 @@ module.exports = (io) => {
    *                   type: string
    *                   example: "Đã rời khỏi bảng thành công!"
    *                 board:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     title:
-   *                       type: string
-   *                     members:
-   *                       type: array
-   *                       items:
-   *                         type: object
-   *                         properties:
-   *                           user:
-   *                             type: object
-   *                             properties:
-   *                               _id:
-   *                                 type: string
-   *                               email:
-   *                                 type: string
-   *                               fullName:
-   *                                 type: string
-   *                               avatar:
-   *                                 type: string
-   *                               isOnline:
-   *                                 type: boolean
-   *                           isActive:
-   *                             type: boolean
+   *                   $ref: '#/components/schemas/Board'
+   *                 cardIds:
+   *                   type: array
+   *                   items:
+   *                     type: string
+   *                   description: Danh sách ID card bị ảnh hưởng
+   *                 redirect:
+   *                   type: string
+   *                   example: "/boards"
    *       400:
-   *         description: Chủ phòng không thể rời bảng
+   *         description: Chủ phòng không thể rời bảng hoặc Board ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Không phải thành viên của bảng
    *       404:
    *         description: Không tìm thấy bảng
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
@@ -845,7 +655,7 @@ module.exports = (io) => {
       "activity",
       "Board"
     ),
-    (req, res) => leaveBoard(req, res, io)
+    leaveBoard
   );
 
   /**
@@ -863,6 +673,7 @@ module.exports = (io) => {
    *         schema:
    *           type: string
    *         description: ID của bảng
+   *         example: "507f1f77bcf86cd799439011"
    *     requestBody:
    *       required: true
    *       content:
@@ -875,7 +686,7 @@ module.exports = (io) => {
    *               newOwnerId:
    *                 type: string
    *                 description: ID của thành viên sẽ trở thành chủ mới
-   *                 example: "507f1f77bcf86cd799439011"
+   *                 example: "507f1f77bcf86cd799439012"
    *     responses:
    *       200:
    *         description: Chuyển quyền sở hữu thành công
@@ -888,51 +699,15 @@ module.exports = (io) => {
    *                   type: string
    *                   example: "Chuyển quyền sở hữu thành công!"
    *                 board:
-   *                   type: object
-   *                   properties:
-   *                     _id:
-   *                       type: string
-   *                     title:
-   *                       type: string
-   *                     owner:
-   *                       type: object
-   *                       properties:
-   *                         _id:
-   *                           type: string
-   *                         email:
-   *                           type: string
-   *                         fullName:
-   *                           type: string
-   *                         isOnline:
-   *                           type: boolean
-   *                     members:
-   *                       type: array
-   *                       items:
-   *                         type: object
-   *                         properties:
-   *                           user:
-   *                             type: object
-   *                             properties:
-   *                               _id:
-   *                                 type: string
-   *                               email:
-   *                                 type: string
-   *                               fullName:
-   *                                 type: string
-   *                               avatar:
-   *                                 type: string
-   *                               isOnline:
-   *                                 type: boolean
-   *                           isActive:
-   *                             type: boolean
+   *                   $ref: '#/components/schemas/Board'
    *       400:
    *         description: ID không hợp lệ hoặc user không phải thành viên
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
    *       403:
    *         description: Chỉ chủ phòng mới có quyền chuyển quyền
    *       404:
    *         description: Không tìm thấy bảng hoặc user
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
    *       500:
    *         description: Lỗi server
    */
@@ -945,8 +720,10 @@ module.exports = (io) => {
       "activity",
       "Board"
     ),
-    (req, res) => transferOwnership(req, res, io)
+    transferOwnership
   );
+  router.get("/workspace/:workspaceId", authMiddleware, getBoardsByWorkspace);
+  router.get("/workspace/:workspaceId/members", authMiddleware, getWorkspaceMembers);
 
   return router;
 };

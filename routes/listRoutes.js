@@ -53,19 +53,6 @@ module.exports = (io) => {
    *     responses:
    *       201:
    *         description: Cột được tạo thành công
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 board:
-   *                   type: string
-   *                 position:
-   *                   type: number
    *       400:
    *         description: Dữ liệu không hợp lệ
    *       401:
@@ -79,14 +66,6 @@ module.exports = (io) => {
    */
   router.post(
     "/",
-    (req, res, next) => {
-      console.log("Entering POST /api/lists route:", {
-        body: req.body,
-        userId: req.user?._id?.toString(),
-        time: new Date().toISOString(),
-      });
-      next();
-    },
     authMiddleware,
     activityMiddleware("list_created", "List", (req) => `User ${req.user.fullName} created list "${req.body.title}"`),
     (req, res) => createList(req, res, io)
@@ -110,25 +89,6 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Danh sách cột
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: array
-   *               items:
-   *                 type: object
-   *                 properties:
-   *                   _id:
-   *                     type: string
-   *                   title:
-   *                     type: string
-   *                   board:
-   *                     type: string
-   *                   position:
-   *                     type: number
-   *                   activities:
-   *                     type: array
-   *                     items:
-   *                       type: object
    *       400:
    *         description: Board ID không hợp lệ
    *       401:
@@ -141,72 +101,6 @@ module.exports = (io) => {
    *         description: Lỗi server
    */
   router.get("/board/:boardId", authMiddleware, getListsByBoard);
-
-  /**
-   * @swagger
-   * /api/lists/{id}:
-   *   put:
-   *     summary: Cập nhật cột
-   *     tags: [Lists]
-   *     security:
-   *       - BearerAuth: []
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: ID của list (phải là ObjectId hợp lệ)
-   *     requestBody:
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               title:
-   *                 type: string
-   *                 example: "Updated List"
-   *               position:
-   *                 type: number
-   *                 example: 1
-   *     responses:
-   *       200:
-   *         description: Cập nhật thành công
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 board:
-   *                   type: string
-   *                 position:
-   *                   type: number
-   *       400:
-   *         description: List ID không hợp lệ
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
-   *       403:
-   *         description: Không có quyền cập nhật cột
-   *       404:
-   *         description: Không tìm thấy cột hoặc board
-   *       500:
-   *         description: Lỗi server
-   */
-  router.put(
-    "/:id",
-    authMiddleware,
-    activityMiddleware("list_updated", "List", (req) => `User ${req.user.fullName} updated list "${req.body.title || 'unknown'}"`),
-    notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật list "${req.body.title || 'unknown'}"`,
-      "activity",
-      "List"
-    ),
-    (req, res) => updateList(req, res, io)
-  );
 
   /**
    * @swagger
@@ -241,14 +135,6 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Cập nhật thành công
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 message:
-   *                   type: string
-   *                   example: "Cập nhật thứ tự thẻ thành công"
    *       400:
    *         description: Dữ liệu không hợp lệ
    *       401:
@@ -262,69 +148,9 @@ module.exports = (io) => {
    */
   router.put(
     "/card-order/:listId",
-    (req, res, next) => {
-      console.log("Received request to /api/lists/card-order/:listId:", {
-        listId: req.params.listId,
-        body: req.body,
-        headers: {
-          authorization: req.headers.authorization,
-        },
-        time: new Date().toISOString(),
-      });
-      next();
-    },
     authMiddleware,
-    activityMiddleware("card-order", "List", (req) => `User ${req.user.fullName} updated card order in list`),
+    activityMiddleware("card_order_updated", "List", (req) => `User ${req.user.fullName} updated card order in list`),
     (req, res) => updateCardOrder(req, res, io)
-  );
-
-  /**
-   * @swagger
-   * /api/lists/{id}:
-   *   delete:
-   *     summary: Ẩn cột
-   *     tags: [Lists]
-   *     security:
-   *       - BearerAuth: []
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: ID của cột (phải là ObjectId hợp lệ)
-   *     responses:
-   *       200:
-   *         description: Ẩn cột thành công
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 message:
-   *                   type: string
-   *                   example: "Đã ẩn cột thành công"
-   *       400:
-   *         description: List ID không hợp lệ
-   *       401:
-   *         description: Không có token hoặc token không hợp lệ
-   *       403:
-   *         description: Không có quyền ẩn cột
-   *       404:
-   *         description: Không tìm thấy cột hoặc board
-   *       500:
-   *         description: Lỗi server
-   */
-  router.delete(
-    "/:id",
-    authMiddleware,
-    activityMiddleware("list_hidden", "List", (req) => `User ${req.user.fullName} hid list`),
-    notificationMiddleware(
-      (req) => `${req.user.fullName} đã ẩn list trong board`,
-      "activity",
-      "List"
-    ),
-    (req, res) => deleteList(req, res, io)
   );
 
   /**
@@ -360,14 +186,6 @@ module.exports = (io) => {
    *     responses:
    *       200:
    *         description: Cập nhật thành công
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 message:
-   *                   type: string
-   *                   example: "Cập nhật thứ tự cột thành công"
    *       400:
    *         description: Dữ liệu không hợp lệ
    *       401:
@@ -384,19 +202,7 @@ module.exports = (io) => {
     authMiddleware,
     (req, res) => updateListOrder(req, res, io)
   );
-router.get("/boards/:boardId/lists", authMiddleware, async (req, res) => {
-  try {
-    const boardId = req.params.boardId;
-    const lists = await List.find({ board: boardId, isDeleted: false })
-      .populate("cardOrderIds")
-      .sort({ position: 1 });
-    res.json(lists);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
 
-// Route mới: GET /api/lists/:id
   /**
    * @swagger
    * /api/lists/{id}:
@@ -415,23 +221,6 @@ router.get("/boards/:boardId/lists", authMiddleware, async (req, res) => {
    *     responses:
    *       200:
    *         description: Thông tin cột
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 _id:
-   *                   type: string
-   *                 title:
-   *                   type: string
-   *                 board:
-   *                   type: string
-   *                 position:
-   *                   type: number
-   *                 cardOrderIds:
-   *                   type: array
-   *                   items:
-   *                     type: string
    *       400:
    *         description: List ID không hợp lệ
    *       401:
@@ -443,10 +232,104 @@ router.get("/boards/:boardId/lists", authMiddleware, async (req, res) => {
    *       500:
    *         description: Lỗi server
    */
-  router.get(
+  router.get("/:id", authMiddleware, (req, res) => {
+    // Sửa parameter name để phù hợp với controller
+    req.params.listId = req.params.id;
+    getListById(req, res);
+  });
+
+  /**
+   * @swagger
+   * /api/lists/{id}:
+   *   put:
+   *     summary: Cập nhật cột
+   *     tags: [Lists]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của list (phải là ObjectId hợp lệ)
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               title:
+   *                 type: string
+   *                 example: "Updated List"
+   *               position:
+   *                 type: number
+   *                 example: 1
+   *     responses:
+   *       200:
+   *         description: Cập nhật thành công
+   *       400:
+   *         description: List ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền cập nhật cột
+   *       404:
+   *         description: Không tìm thấy cột hoặc board
+   *       500:
+   *         description: Lỗi server
+   */
+  router.put(
     "/:id",
     authMiddleware,
-    getListById
+    activityMiddleware("list_updated", "List", (req) => `User ${req.user.fullName} updated list "${req.body.title || 'unknown'}"`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã cập nhật list "${req.body.title || 'unknown'}"`,
+      "activity",
+      "List"
+    ),
+    (req, res) => updateList(req, res, io)
+  );
+
+  /**
+   * @swagger
+   * /api/lists/{id}:
+   *   delete:
+   *     summary: Ẩn cột
+   *     tags: [Lists]
+   *     security:
+   *       - BearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: ID của cột (phải là ObjectId hợp lệ)
+   *     responses:
+   *       200:
+   *         description: Ẩn cột thành công
+   *       400:
+   *         description: List ID không hợp lệ
+   *       401:
+   *         description: Không có token hoặc token không hợp lệ
+   *       403:
+   *         description: Không có quyền ẩn cột
+   *       404:
+   *         description: Không tìm thấy cột hoặc board
+   *       500:
+   *         description: Lỗi server
+   */
+  router.delete(
+    "/:id",
+    authMiddleware,
+    activityMiddleware("list_hidden", "List", (req) => `User ${req.user.fullName} hid list`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã ẩn list trong board`,
+      "activity",
+      "List"
+    ),
+    (req, res) => deleteList(req, res, io)
   );
 
   return router;

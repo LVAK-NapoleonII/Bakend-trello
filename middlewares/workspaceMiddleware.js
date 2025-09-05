@@ -15,18 +15,18 @@ const workspaceMiddleware = async (req, res, next) => {
       return res.status(404).json({ message: "Workspace không tồn tại!" });
     }
 
-    const isMember = workspace.members.some(
-      (memberId) => memberId.toString() === req.user._id.toString()
-    );
+    const isMember = workspace.members.some((memberId) => memberId.toString() === req.user._id.toString());
+    const isOwner = workspace.owner.toString() === req.user._id.toString();
 
-    if (!isMember && !workspace.isPublic && req.method !== "POST") {
+    // Sửa lỗi: Sử dụng workspace.isPublic thay vì isPublic
+    if (!workspace.isPublic && !isMember && !isOwner && req.method !== "POST") {
       return res.status(403).json({ message: "Bạn không có quyền truy cập workspace này!" });
     }
 
     req.workspace = workspace;
     next();
   } catch (error) {
-    console.error("Workspace middleware error:", error);
+    console.error("Workspace middleware error:", error.message, error.stack);
     return res.status(500).json({ message: "Lỗi xác thực workspace", error: error.message });
   }
 };

@@ -1,14 +1,13 @@
 const Activity = require("../models/Activity");
+const Card = require("../models/Card");
 
 const completionMiddleware = async (req, res, next) => {
   try {
     const cardId = req.params.id || req.body.cardId;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user._id;
     const { completed, checklistId, itemId } = req.body;
 
-    const Card = require("../models/cardSchema");
     const card = await Card.findById(cardId);
-
     if (!card) {
       return res.status(404).json({ message: "Card không tồn tại" });
     }
@@ -16,8 +15,11 @@ const completionMiddleware = async (req, res, next) => {
     let activity;
 
     // Trường hợp cập nhật completed của card
-    if (typeof completed === "boolean") {
-      const action = completed ? "card_completed" : "card_uncompleted";
+    if (typeof completed === "boolean" && !checklistId) {
+      const action = {
+        category: "card",
+        type: completed ? "completed" : "uncompleted",
+      };
       activity = new Activity({
         user: userId,
         action,
@@ -38,13 +40,16 @@ const completionMiddleware = async (req, res, next) => {
       if (!item) {
         return res.status(404).json({ message: "Checklist item không tồn tại" });
       }
-      const action = completed ? "checklist_completed" : "checklist_uncompleted";
+      const action = {
+        category: "checklist",
+        type: completed ? "completed" : "uncompleted",
+      };
       activity = new Activity({
         user: userId,
         action,
         target: cardId,
         targetModel: "Card",
-        details: `Checklist item "${item.text}" was marked as ${completed ? "completed" : "uncompleted"}`,
+        details: `Checklist item "${item.title}" was marked as ${completed ? "completed" : "uncompleted"}`,
       });
       item.completed = completed;
     }
@@ -55,8 +60,7 @@ const completionMiddleware = async (req, res, next) => {
       await card.save();
     }
 
-    req.card = card; // Gắn card vào req để controller sử dụng
-
+    req.card = card;
     next();
   } catch (error) {
     console.error("Completion middleware error:", error);

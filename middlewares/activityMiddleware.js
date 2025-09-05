@@ -1,28 +1,49 @@
 const Activity = require("../models/Activity");
 
-const activityMiddleware = (action, targetModel, detailsFn) => {
+const activityMiddleware = (actionType, category, targetModel, detailsFn) => {
   return async (req, res, next) => {
     try {
-      if (!req.user || !req.user._id) {
-        console.log("No user found in req.user");
+      const userId = req.user?._id;
+      if (!userId) {
+        console.error("activityMiddleware: Missing userId");
         return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
       }
 
-      const userId = req.user._id;
-      const details = detailsFn(req);
+      // Provide a default details string if detailsFn is not a function
+      let details = `User ${req.user.fullName} performed ${actionType} on ${targetModel}`;
+      if (typeof detailsFn === "function") {
+        try {
+          details = detailsFn(req);
+        } catch (error) {
+          console.error("activityMiddleware: Error in detailsFn", {
+            message: error.message,
+            stack: error.stack,
+          });
+          // Fallback to default details if detailsFn fails
+        }
+      }
 
-      // Lưu dữ liệu hoạt động vào req
-      req.activityData = {
-        action,
+      console.log("activityMiddleware: Generating activity data", {
+        actionType,
+        category,
         targetModel,
         details,
         userId,
+      });
+
+      req.activityData = {
+        action: { type: actionType, category },
+        targetModel,
+        details,
+        user: userId,
       };
 
-      console.log("Activity middleware prepared:", req.activityData);
       next();
     } catch (error) {
-      console.error("Activity middleware error:", error.message, error.stack);
+      console.error("activityMiddleware error:", {
+        message: error.message,
+        stack: error.stack,
+      });
       return res.status(500).json({ message: "Lỗi khi ghi hoạt động", error: error.message });
     }
   };

@@ -1,195 +1,120 @@
-const mongoose = require('mongoose');
-const Notification = require('../models/Notification');
+const mongoose = require("mongoose");
+const Notification = require("../models/Notification");
 
-exports.getNotifications = async (req, res) => {
+const getNotifications = async (req, res) => {
   try {
-    console.log('getNotifications: Request user:', req.user);
-    if (!req.user || !req.user._id) {
-      console.error('getNotifications: Missing or invalid user in request');
-      return res.status(401).json({ message: 'Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.' });
+    const userId = req.user?._id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({ message: "Không tìm thấy hoặc ID người dùng không hợp lệ!" });
     }
 
-    const userId = req.user._id;
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      console.error('getNotifications: Invalid user ID:', userId);
-      return res.status(400).json({ message: 'ID người dùng không hợp lệ' });
-    }
-    console.log('getNotifications: Fetching for user:', userId);
 
-    console.log('getNotifications: Fetching raw notifications...');
-    const rawNotifications = await Notification.find({
-      user: userId,
-      isHidden: false
-    }).lean();
-    console.log('getNotifications: Raw notifications:', JSON.stringify(rawNotifications, null, 2));
-
-    console.log('getNotifications: Populating notifications...');
     const notifications = await Notification.find({
       user: userId,
-      isHidden: false
+      isHidden: false,
     })
       .sort({ createdAt: -1 })
-      .populate([
-        {
-          path: 'target',
-          select: 'title name _id board workspace', // Thêm workspace
-          match: { isDeleted: { $ne: true } },
-          options: { strictPopulate: false },
-        },
-        {
-          path: 'target',
-          populate: {
-            path: 'board',
-            model: 'Board',
-            select: 'title workspace',
-            match: { isDeleted: { $ne: true } },
-            options: { strictPopulate: false },
-            populate: {
-              path: 'workspace',
-              model: 'Workspace',
-              select: '_id name',
-              match: { isDeleted: { $ne: true } }
-            }
-          },
-          options: { strictPopulate: false }
-        },
-        {
-          path: 'target',
-          populate: {
-            path: 'workspace',
-            model: 'Workspace',
-            select: '_id name',
-            match: { isDeleted: { $ne: true } },
-            options: { strictPopulate: false }
-          },
-          options: { strictPopulate: false }
-        }
-      ])
+      .populate({
+        path: "target",
+        select: "title name _id board workspace list", // Thêm trường list nếu cần
+        match: { isDeleted: { $ne: true } },
+      })
       .lean();
 
-    console.log('getNotifications: Populated notifications:', JSON.stringify(notifications, null, 2));
 
-    console.log('getNotifications: Filtering valid notifications...');
-    const validNotifications = notifications.filter((notification) => {
-      if (notification.targetModel === 'Card') {
-        if (!notification.target) {
-          console.warn('getNotifications: Invalid Card notification, missing target:', notification);
-          return false;
+    const cardNotifications = notifications.filter(n => 
+      n.target && n.targetModel === "Card"
+    );
+    
+    const boardNotifications = notifications.filter(n => 
+      n.target && n.targetModel === "Board"
+    );
+
+
+    const cardIds = cardNotifications.map(n => n.target._id);
+    const cards = await mongoose.model("Card")
+      .find({ _id: { $in: cardIds } })
+      .populate({
+        path: "board",
+        select: "_id title workspace",
+        match: { isDeleted: { $ne: true } },
+        populate: {
+          path: "workspace",
+          select: "_id name",
+          match: { isDeleted: { $ne: true } },
         }
-        if (!notification.target.board) {
-          console.warn('getNotifications: Invalid Card notification, missing board:', notification);
-          return false;
+      })
+      .lean();
+
+    const cardMap = new Map(cards.map(card => [card._id.toString(), card]));
+
+ 
+    const boardIds = boardNotifications.map(n => n.target._id);
+    const boards = await mongoose.model("Board")
+      .find({ _id: { $in: boardIds } })
+      .populate({
+        path: "workspace",
+        select: "_id name",
+        match: { isDeleted: { $ne: true } },
+      })
+      .lean();
+
+    const boardMap = new Map(boards.map(board => [board._id.toString(), board]));
+
+ 
+    const enrichedNotifications = notifications.map(notification => {
+      if (!notification.target) return null;
+      
+      // Xử lý Card: Thêm boardId và thông tin workspace
+      if (notification.targetModel === "Card") {
+        const card = cardMap.get(notification.target._id.toString());
+        if (card && card.board && card.board.workspace) {
+          return {
+            ...notification,
+            target: {
+              ...notification.target,
+              boardId: card.board._id, // Thêm boardId vào target
+              board: card.board,       // Giữ nguyên thông tin board
+              workspace: card.board.workspace
+            }
+          };
         }
-        if (!notification.target.board.workspace) {
-          console.warn('getNotifications: Invalid Card notification, missing workspace:', notification);
-          return false;
-        }
-      } else if (notification.targetModel === 'Board') {
-        if (!notification.target) {
-          console.warn('getNotifications: Invalid Board notification, missing target:', notification);
-          return false;
-        }
-        if (!notification.target.workspace) {
-          console.warn('getNotifications: Invalid Board notification, missing workspace:', notification);
-          return false;
-        }
-      } else {
-        console.warn('getNotifications: Unsupported targetModel:', notification.targetModel, notification);
-        return true;
+        return null;
       }
-      return true;
+      
+      // Xử lý Board: Thêm workspaceId
+      if (notification.targetModel === "Board") {
+        const board = boardMap.get(notification.target._id.toString());
+        if (board && board.workspace) {
+          return {
+            ...notification,
+            target: {
+              ...notification.target,
+              workspaceId: board.workspace._id, // Thêm workspaceId
+              workspace: board.workspace
+            }
+          };
+        }
+        return null;
+      }
+      
+      return notification;
     });
 
-    const unreadCount = validNotifications.filter((n) => !n.isRead).length;
-    console.log('getNotifications: Found', validNotifications.length, 'valid notifications, unread:', unreadCount);
+    
+    const validNotifications = enrichedNotifications.filter(n => n !== null);
+    const unreadCount = validNotifications.filter(n => !n.isRead).length;
 
     res.status(200).json({ notifications: validNotifications, unreadCount });
   } catch (error) {
-    console.error('getNotifications: Error:', {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      name: error.name
-    });
-    res.status(500).json({ 
-      message: 'Lỗi khi lấy thông báo', 
-      error: error.message,
-      errorName: error.name,
-      errorCode: error.code
-    });
+    console.error("getNotifications error:", error.message);
+    res.status(500).json({ message: "Lỗi khi lấy thông báo" });
   }
 };
-
-exports.markNotificationAsRead = async (req, res) => {
-  try {
-    const { notificationId } = req.params;
-    const userId = req.user._id;
-
-    const notification = await Notification.findOne({ _id: notificationId, user: userId });
-    if (!notification) {
-      return res.status(404).json({ message: "Thông báo không tồn tại hoặc không thuộc về bạn" });
-    }
-
-    notification.isRead = true;
-    await notification.save();
-
-    res.status(200).json({ message: "Thông báo đã được đánh dấu là đã đọc", notification });
-  } catch (error) {
-    console.error("markNotificationAsRead: Error:", error);
-    res.status(500).json({ message: "Lỗi khi đánh dấu thông báo", error: error.message });
-  }
-};
-
-exports.markAllNotificationsAsRead = async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    await Notification.updateMany(
-      { user: userId, isRead: false, isHidden: false },
-      { $set: { isRead: true } }
-    );
-
-    res.status(200).json({ message: "Tất cả thông báo đã được đánh dấu là đã đọc" });
-  } catch (error) {
-    console.error("markAllNotificationsAsRead: Error:", error);
-    res.status(500).json({ message: "Lỗi khi đánh dấu tất cả thông báo", error: error.message });
-  }
-};
-
-exports.deleteNotification = async (req, res) => {
-  try {
-    const { notificationId } = req.params;
-    const userId = req.user._id;
-
-    const notification = await Notification.findOneAndUpdate(
-      { _id: notificationId, user: userId },
-      { $set: { isHidden: true } },
-      { new: true }
-    );
-
-    if (!notification) {
-      return res.status(404).json({ message: "Thông báo không tồn tại hoặc không thuộc về bạn" });
-    }
-
-    res.status(200).json({ message: "Thông báo đã được ẩn" });
-  } catch (error) {
-    console.error("deleteNotification: Error:", error);
-    res.status(500).json({ message: "Lỗi khi ẩn thông báo", error: error.message });
-  }
-};
-
-exports.deleteAllNotifications = async (req, res) => {
-  try {
-    const userId = req.user._id;
-
-    await Notification.updateMany(
-      { user: userId, isHidden: false },
-      { $set: { isHidden: true } }
-    );
-
-    res.status(200).json({ message: "Tất cả thông báo đã được ẩn" });
-  } catch (error) {
-    console.error("deleteAllNotifications: Error:", error);
-    res.status(500).json({ message: "Lỗi khi ẩn tất cả thông báo", error: error.message });
-  }
+module.exports = {
+  getNotifications,
+  markNotificationAsRead: require("./notification/markNotificationAsRead"),
+  markAllNotificationsAsRead: require("./notification/markAllNotificationsAsRead"),
+  deleteNotification: require("./notification/deleteNotification"),
+  deleteAllNotifications: require("./notification/deleteAllNotifications"),
 };

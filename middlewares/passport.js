@@ -23,10 +23,10 @@ passport.use(
           });
           await user.save();
 
-          // Ghi hoạt động khi user mới được tạo
+          // Ghi hoạt động
           const activity = new Activity({
             user: user._id,
-            action: "user_created",
+            action: { category: "user", type: "created" },
             target: user._id,
             targetModel: "User",
             details: `User ${user.fullName} created an account via Google`,
