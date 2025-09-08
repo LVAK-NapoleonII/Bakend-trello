@@ -28,8 +28,9 @@ const addComment = async (req, res) => {
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
     if (!board) return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
 
-    const isMember = board.members.some((m) => m.user?.toString() === userId.toString() && m.isActive);
-    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền bình luận trên thẻ này!" });
+    // Kiểm tra quyền: Chỉ thành viên card được phép bình luận
+    const isMember = card.members.some((m) => m.toString() === userId.toString());
+    if (!isMember) return res.status(403).json({ message: "Bạn không phải thành viên của thẻ này để bình luận!" });
 
     // Tạo Comment document riêng
     const comment = new Comment({
@@ -61,17 +62,21 @@ const addComment = async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
-      io.to(card.board.toString()).emit("comment-added", {
-        cardId,
-        comment: {
-          _id: comment._id,
-          user: comment.user,
-          text: comment.text,
-          createdAt: comment.createdAt,
-          isDeleted: comment.isDeleted,
-        },
-        boardId: card.board.toString(),
-        message: `${req.user.fullName} đã thêm bình luận "${text}" vào card "${card.title}"`,
+      // Chỉ gửi sự kiện đến các thành viên trong card
+      const memberSockets = card.members.map((m) => m.toString());
+      memberSockets.forEach((memberId) => {
+        io.to(memberId).emit("comment-added", {
+          cardId,
+          comment: {
+            _id: comment._id,
+            user: comment.user,
+            text: comment.text,
+            createdAt: comment.createdAt,
+            isDeleted: comment.isDeleted,
+          },
+          boardId: card.board.toString(),
+          message: `${req.user.fullName} đã thêm bình luận "${text}" vào card "${card.title}"`,
+        });
       });
     }
 
@@ -87,7 +92,7 @@ const hideComment = async (req, res) => {
   try {
     const { cardId, commentId } = req.params;
     const userId = req.user?._id;
-    
+
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(cardId) || !mongoose.Types.ObjectId.isValid(commentId)) {
       return res.status(400).json({ message: "Card ID hoặc comment ID không hợp lệ!" });
@@ -99,15 +104,18 @@ const hideComment = async (req, res) => {
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
     if (!board) return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
 
-    const isMember = board.members.some((m) => m.user?.toString() === userId.toString() && m.isActive);
-    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền thu hồi bình luận!" });
+    // Kiểm tra quyền: Chỉ thành viên card được phép ẩn bình luận
+    const isMember = card.members.some((m) => m.toString() === userId.toString());
+    const isBoardOwner = board.owner?.toString() === userId.toString();
+    if (!isMember && !isBoardOwner) {
+      return res.status(403).json({ message: "Bạn không phải thành viên của thẻ này hoặc chủ sở hữu board để thu hồi bình luận!" });
+    }
 
     // Tìm comment trong Comment collection
     const comment = await Comment.findOne({ _id: commentId, card: cardId, isDeleted: false });
     if (!comment) return res.status(404).json({ message: "Không tìm thấy bình luận!" });
-    
-    // Kiểm tra quyền sở hữu hoặc board owner
-    const isBoardOwner = board.owner?.toString() === userId.toString();
+
+    // Kiểm tra quyền sở hữu bình luận hoặc board owner
     if (comment.user.toString() !== userId.toString() && !isBoardOwner) {
       return res.status(403).json({ message: "Bạn chỉ có thể thu hồi bình luận của chính mình!" });
     }
@@ -124,18 +132,22 @@ const hideComment = async (req, res) => {
       details: `User ${req.user.fullName} hid comment "${comment.text}" in card "${card.title}"`,
     });
     await activity.save();
-    
+
     card.activities.push(activity._id);
     board.activities.push(activity._id);
     await Promise.all([card.save(), board.save()]);
 
     const io = req.app.get("io");
     if (io) {
-      io.to(card.board.toString()).emit("comment-hidden", {
-        cardId,
-        commentId,
-        boardId: card.board.toString(),
-        message: `${req.user.fullName} đã thu hồi bình luận trong card "${card.title}"`,
+      // Chỉ gửi sự kiện đến các thành viên trong card
+      const memberSockets = card.members.map((m) => m.toString());
+      memberSockets.forEach((memberId) => {
+        io.to(memberId).emit("comment-hidden", {
+          cardId,
+          commentId,
+          boardId: card.board.toString(),
+          message: `${req.user.fullName} đã thu hồi bình luận trong card "${card.title}"`,
+        });
       });
     }
 

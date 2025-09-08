@@ -168,14 +168,14 @@ module.exports = (io) => {
       io.to(cardId).emit("member-added", { cardId, members });
     });
 
-    socket.on("comment-added", ({ cardId, comment }) => {
-      io.to(cardId).emit("comment-added", { cardId, comment });
-    });
+    // socket.on("comment-added", ({ cardId, comment }) => {
+    //   io.to(cardId).emit("comment-added", { cardId, comment });
+    // });
 
-    socket.on("comment-hidden", ({ cardId, commentId, actorId }) => {
-      if (actorId !== userId) return;
-      io.to(cardId).emit("comment-hidden", { cardId, commentId, actorId });
-    });
+    // socket.on("comment-hidden", ({ cardId, commentId, actorId }) => {
+    //   if (actorId !== userId) return;
+    //   io.to(cardId).emit("comment-hidden", { cardId, commentId, actorId });
+    // });
 
     socket.on("note-added", ({ cardId, note }) => {
       io.to(cardId).emit("note-added", { cardId, note });
