@@ -170,10 +170,7 @@ const deleteWorkspace = async (req, res) => {
       return res.status(403).json({ message: "Chỉ owner mới có quyền ẩn workspace!" });
     }
 
-    await Board.updateMany({ workspace: id }, { $set: { isDeleted: true } });
     workspace.isDeleted = true;
-    await workspace.save();
-
     const activity = new Activity({
       user: userId,
       action: { category: "workspace", type: "deleted" },
@@ -226,7 +223,7 @@ const restoreWorkspace = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?._id;
-    console.log("Restoring workspace:", { id, userId, body: req.body });
+    console.log("Restoring workspace:", { id, userId });
 
     if (!userId) {
       console.log("Missing user info");
@@ -251,14 +248,8 @@ const restoreWorkspace = async (req, res) => {
       return res.status(400).json({ message: "Workspace này chưa bị xóa!" });
     }
 
-    console.log("Updating boards for workspace:", id);
-    await Board.updateMany({ workspace: id }, { $set: { isDeleted: false } });
     console.log("Setting workspace isDeleted to false");
     workspace.isDeleted = false;
-    await workspace.save();
-    console.log("Workspace restored:", id);
-
-    console.log("Creating activity for restore");
     const activity = new Activity({
       user: userId,
       action: { category: "workspace", type: "restored" },
@@ -269,7 +260,7 @@ const restoreWorkspace = async (req, res) => {
     await activity.save();
     workspace.activities.push(activity._id);
     await workspace.save();
-    console.log("Activity saved and added to workspace");
+    console.log("Workspace restored and activity saved:", id);
 
     const io = req.app.get("io");
     if (io) {
@@ -310,7 +301,6 @@ const restoreWorkspace = async (req, res) => {
     res.status(500).json({ message: "Lỗi khôi phục workspace", error: error.message });
   }
 };
-
 const leaveWorkspace = async (req, res) => {
   try {
     const { id } = req.params;
