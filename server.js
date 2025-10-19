@@ -35,11 +35,17 @@ mongoose
 // Middleware
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: [
+    'http://localhost:5173',
+    'https://wcs4sbm1-5173.asse.devtunnels.ms',
+    'http://192.168.1.7:5173' 
+  ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
 );
+
+
 app.use(cookieParser());
 app.use(express.json());
 app.use("/Uploads", express.static(path.join(__dirname, "Uploads")));

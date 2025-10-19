@@ -100,7 +100,23 @@ const getBoardById = async (req, res) => {
       .populate("members.user", "email avatar fullName isOnline")
       .populate("invitedUsers.user", "email avatar fullName isOnline")
       .populate("owner", "email fullName _id isOnline")
-      .populate("workspace", "name");
+      .populate("workspace", "name")
+      .populate({
+        path: "listOrderIds",
+        match: { isDeleted: false },
+        populate: {
+          path: "cardOrderIds",
+          model: "Card",
+          match: { isDeleted: false },
+          select: "title description position members completed checklists comments notes activities labels attachments createdAt updatedAt",
+          populate: [
+            { path: "members", select: "email fullName avatar isOnline" },
+            { path: "comments.user", select: "email fullName avatar isOnline" },
+            { path: "notes.createdBy", select: "email fullName avatar isOnline" },
+            { path: "activities", match: { isDeleted: false } },
+          ],
+        },
+      });
 
     if (!board) return res.status(404).json({ message: "Board không tồn tại" });
 
@@ -116,7 +132,14 @@ const getBoardById = async (req, res) => {
       return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
     }
 
-    res.status(200).json(board);
+    // Thêm columnOrderIds (array _id của listOrderIds) và columns
+    const formattedBoard = {
+      ...board.toObject(),
+      columns: board.listOrderIds, // array List populated
+      columnOrderIds: board.listOrderIds.map((list) => list._id), // array ID của List
+    };
+
+    res.status(200).json(formattedBoard);
   } catch (error) {
     console.error("getBoardById error:", error.message);
     res.status(500).json({ message: "Lỗi server" });

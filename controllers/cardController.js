@@ -113,7 +113,7 @@ const getCardsByList = async (req, res) => {
     const cards = await Card.find({ list: listId, isDeleted: false })
       .populate("members", "email fullName avatar isOnline")
       .populate("labels")
-      .sort({ order: 1 });
+      .sort({ position: 1 });  // Sửa từ { order: 1 } thành { position: 1 }
 
     res.status(200).json(cards);
   } catch (error) {

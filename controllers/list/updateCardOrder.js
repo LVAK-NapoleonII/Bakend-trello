@@ -37,8 +37,21 @@ const updateCardOrder = async (req, res) => {
       }
     }
 
+    // Cập nhật cardOrderIds trong List
     list.cardOrderIds = cardOrder.map((id) => new mongoose.Types.ObjectId(id));
 
+    // Cập nhật position cho tất cả thẻ dựa trên cardOrder
+    await Promise.all(
+      cardOrder.map(async (cardId, index) => {
+        await Card.findByIdAndUpdate(
+          cardId,
+          { position: index },
+          { new: true }
+        );
+      })
+    );
+
+    // Lưu activity
     const activity = new Activity({
       user: userId,
       action: { category: "list", type: "card_order_updated" },
@@ -49,13 +62,20 @@ const updateCardOrder = async (req, res) => {
     await activity.save();
     board.activities = board.activities || [];
     board.activities.push(activity._id);
+
+    // Lưu thay đổi vào DB
     await Promise.all([list.save(), board.save()]);
 
+    // Debug log
+    console.log("updateCardOrder: Updated cardOrderIds:", list.cardOrderIds.map(id => id.toString()));
+    console.log("updateCardOrder: Updated positions:", await Card.find({ list: listId, isDeleted: false }).select('title position'));
+
+    // Emit sự kiện card-order-updated
     const io = req.app.get("io");
     if (io) {
       io.to(list.board.toString()).emit("card-order-updated", {
         listId,
-        cardOrder,
+        cardOrder: cardOrder,
         message: `Thứ tự thẻ trong list "${list.title}" đã được cập nhật bởi ${req.user.fullName}`,
       });
     }

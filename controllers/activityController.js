@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Activity = require('../models/Activity');
+const User = require("../models/User");
 
 exports.getActivities = async (req, res) => {
   try {
