@@ -6,11 +6,19 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String },
   isVerified: { type: Boolean, default: false },
+  isAdmin: { type: Boolean, default: false }, // Thêm trường admin
   otp: { type: String },
   otpExpires: { type: Date },
   avatar: { type: String },
   isOnline: { type: Boolean, default: false },
-  isHidden: {type: Boolean, default: false},
+  isHidden: { type: Boolean, default: false },
+  lastActive: { type: Date, default: Date.now }, // Theo dõi lần hoạt động cuối
+  inactiveNoticeSent: { type: Boolean, default: false }, // Đã gửi thông báo chưa
+  scheduledDeletion: { type: Date }, // Thời gian dự kiến xóa
+  isBanned: { type: Boolean, default: false },
+  banReason: { type: String },
+  bannedAt: { type: Date },
+  banExpiresAt: { type: Date },
   notifications: [{ type: mongoose.Schema.Types.ObjectId, ref: "Notification" }],
   notificationSettings: {
     dueDateReminders: {
@@ -25,7 +33,11 @@ const userSchema = new mongoose.Schema({
       expiryDate: { type: Date },
     },
   },
-});
+}, { timestamps: true });
+
+// Index để tìm kiếm user không hoạt động
+userSchema.index({ lastActive: 1, isHidden: false });
+userSchema.index({ isAdmin: 1 });
 
 userSchema.pre("save", async function (next) {
   if (this.isModified("password")) {
@@ -36,6 +48,12 @@ userSchema.pre("save", async function (next) {
 
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// Method để cập nhật lastActive
+userSchema.methods.updateLastActive = function() {
+  this.lastActive = new Date();
+  return this.save();
 };
 
 module.exports = mongoose.model("User", userSchema);

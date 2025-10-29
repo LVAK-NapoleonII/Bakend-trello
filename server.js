@@ -14,7 +14,10 @@ const listRoutes = require("./routes/listRoutes");
 const cardRoutes = require("./routes/cardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const activityRoutes = require("./routes/activityRoutes");
-const setupSocket = require("./socket/setupSocket"); // Tách Socket.IO setup
+const setupSocket = require("./socket/setupSocket"); 
+const adminRoutes = require("./routes/adminRoutes");
+const { scheduleInactiveUserCleanup } = require("./jobs/inactiveUserCleanup");
+
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +64,11 @@ app.use("/api/lists", listRoutes(io));
 app.use("/api/cards", cardRoutes(io));
 app.use("/api/activities", activityRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin", adminRoutes);
+
+if (process.env.NODE_ENV !== "test") {
+  scheduleInactiveUserCleanup();
+}
 
 // Kích hoạt Swagger API Docs
 swaggerDocs(app);

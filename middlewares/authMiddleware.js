@@ -20,6 +20,9 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ message: "User không tồn tại!" });
     }
 
+    user.lastActive = new Date();
+    await user.save();
+
     req.user = user;
     next();
   } catch (error) {
