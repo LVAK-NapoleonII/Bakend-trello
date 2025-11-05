@@ -1,3 +1,4 @@
+// controllers/adminController.js - Optimized version
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const Workspace = require("../models/Workspace");
@@ -5,18 +6,18 @@ const Board = require("../models/Board");
 const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
 const sendEmail = require("../utils/sendEmail");
+const workspaceController = require("./workspaceController");
+const boardController = require("./boardController");
 
-// ============= USER MANAGEMENT =============
+// ============= DASHBOARD =============
 
-// Lấy thống kê tổng quan
-exports.getDashboardStats = async (req, res) => {
+const getDashboardStats = async (req, res) => {
   try {
     const totalUsers = await User.countDocuments({ isHidden: false });
     const activeUsers = await User.countDocuments({ isOnline: true, isHidden: false });
     const totalWorkspaces = await Workspace.countDocuments({ isDeleted: false });
     const totalBoards = await Board.countDocuments({ isDeleted: false });
     
-    // Users không hoạt động > 90 ngày
     const inactiveDate = new Date();
     inactiveDate.setDate(inactiveDate.getDate() - 90);
     const inactiveUsers = await User.countDocuments({
@@ -37,8 +38,9 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// Lấy danh sách tất cả users
-exports.getAllUsers = async (req, res) => {
+// ============= USER MANAGEMENT =============
+
+const getAllUsers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search, status } = req.query;
     
@@ -82,8 +84,7 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-// Lấy chi tiết user
-exports.getUserDetails = async (req, res) => {
+const getUserDetails = async (req, res) => {
   try {
     const { userId } = req.params;
     
@@ -99,7 +100,7 @@ exports.getUserDetails = async (req, res) => {
       return res.status(404).json({ message: "User không tồn tại!" });
     }
 
-    // Lấy thống kê của user
+    // Bổ sung stats
     const workspaces = await Workspace.countDocuments({
       members: userId,
       isDeleted: false
@@ -131,8 +132,7 @@ exports.getUserDetails = async (req, res) => {
   }
 };
 
-// Cập nhật trạng thái admin
-exports.updateAdminStatus = async (req, res) => {
+const updateAdminStatus = async (req, res) => {
   try {
     const { userId } = req.params;
     const { isAdmin } = req.body;
@@ -156,6 +156,7 @@ exports.updateAdminStatus = async (req, res) => {
       return res.status(404).json({ message: "User không tồn tại!" });
     }
 
+    // Activity & Notification
     const activity = new Activity({
       user: adminId,
       action: { category: "user", type: isAdmin ? "admin_granted" : "admin_revoked" },
@@ -194,8 +195,135 @@ exports.updateAdminStatus = async (req, res) => {
   }
 };
 
-// Xóa user
-exports.deleteUser = async (req, res) => {
+// BAN USER - Chức năng mới
+const banUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason, duration } = req.body; // duration in days, null = permanent
+    const adminId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User ID không hợp lệ!" });
+    }
+
+    if (userId === adminId.toString()) {
+      return res.status(400).json({ message: "Không thể ban chính mình!" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User không tồn tại!" });
+    }
+
+    if (user.isAdmin) {
+      return res.status(403).json({ message: "Không thể ban admin khác!" });
+    }
+
+    user.isBanned = true;
+    user.banReason = reason || "Vi phạm quy định";
+    user.bannedAt = new Date();
+    if (duration) {
+      user.banExpiresAt = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
+    }
+    user.isOnline = false;
+    await user.save();
+
+    const activity = new Activity({
+      user: adminId,
+      action: { category: "user", type: "banned" },
+      target: userId,
+      targetModel: "User",
+      details: `Admin ${req.user.fullName} banned user ${user.fullName}. Reason: ${reason}`
+    });
+    await activity.save();
+
+    // Send email notification
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: "Tài khoản của bạn đã bị khóa",
+        html: `
+          <h2>Tài khoản của bạn đã bị khóa</h2>
+          <p>Xin chào ${user.fullName},</p>
+          <p>Tài khoản của bạn đã bị khóa bởi quản trị viên.</p>
+          <p><strong>Lý do:</strong> ${reason}</p>
+          ${duration ? `<p><strong>Thời hạn:</strong> ${duration} ngày</p>` : '<p>Khóa vĩnh viễn</p>'}
+          <p>Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ với chúng tôi.</p>
+        `
+      });
+    } catch (emailError) {
+      console.error("Failed to send ban email:", emailError);
+    }
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(userId).emit("account-banned", {
+        message: "Tài khoản của bạn đã bị khóa",
+        reason,
+        expiresAt: user.banExpiresAt
+      });
+    }
+
+    res.status(200).json({ message: "Đã ban user thành công", user });
+  } catch (error) {
+    console.error("banUser error:", error.message);
+    res.status(500).json({ message: "Lỗi ban user" });
+  }
+};
+
+// UNBAN USER
+const unbanUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const adminId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "User ID không hợp lệ!" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User không tồn tại!" });
+    }
+
+    if (!user.isBanned) {
+      return res.status(400).json({ message: "User chưa bị ban!" });
+    }
+
+    user.isBanned = false;
+    user.banReason = null;
+    user.bannedAt = null;
+    user.banExpiresAt = null;
+    await user.save();
+
+    const activity = new Activity({
+      user: adminId,
+      action: { category: "user", type: "unbanned" },
+      target: userId,
+      targetModel: "User",
+      details: `Admin ${req.user.fullName} unbanned user ${user.fullName}`
+    });
+    await activity.save();
+
+    const notification = new Notification({
+      user: userId,
+      message: "Tài khoản của bạn đã được mở khóa",
+      type: "general",
+      target: user._id,
+      targetModel: "User",
+      isRead: false,
+      isHidden: false
+    });
+    await notification.save();
+
+    res.status(200).json({ message: "Đã unban user thành công", user });
+  } catch (error) {
+    console.error("unbanUser error:", error.message);
+    res.status(500).json({ message: "Lỗi unban user" });
+  }
+};
+
+const deleteUser = async (req, res) => {
   try {
     const { userId } = req.params;
     const { permanent = false } = req.body;
@@ -215,7 +343,7 @@ exports.deleteUser = async (req, res) => {
     }
 
     if (permanent) {
-      // Xóa vĩnh viễn - xóa user khỏi tất cả workspaces và boards
+      // Xóa vĩnh viễn
       await Workspace.updateMany(
         { members: userId },
         { $pull: { members: userId } }
@@ -226,7 +354,6 @@ exports.deleteUser = async (req, res) => {
         { $pull: { members: { user: userId } } }
       );
 
-      // Chuyển ownership các workspaces/boards sang admin hoặc xóa
       await Workspace.updateMany(
         { owner: userId },
         { $set: { isDeleted: true } }
@@ -279,8 +406,7 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// Khôi phục user
-exports.restoreUser = async (req, res) => {
+const restoreUser = async (req, res) => {
   try {
     const { userId } = req.params;
     const adminId = req.user._id;
@@ -339,8 +465,7 @@ exports.restoreUser = async (req, res) => {
 
 // ============= WORKSPACE MANAGEMENT =============
 
-// Lấy tất cả workspaces
-exports.getAllWorkspaces = async (req, res) => {
+const getAllWorkspaces = async (req, res) => {
   try {
     const { page = 1, limit = 20, search } = req.query;
     
@@ -374,8 +499,49 @@ exports.getAllWorkspaces = async (req, res) => {
   }
 };
 
-// Xóa workspace
-exports.deleteWorkspace = async (req, res) => {
+const getWorkspaceDetails = async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+    }
+
+    const workspace = await Workspace.findById(workspaceId)
+      .populate("owner", "email fullName avatar")
+      .populate("members", "email fullName avatar")
+      .lean();
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace không tồn tại!" });
+    }
+
+    // Bổ sung stats
+    const boards = await Board.countDocuments({
+      workspace: workspaceId,
+      isDeleted: false
+    });
+
+    const activities = await Activity.countDocuments({
+      target: workspaceId,
+      targetModel: "Workspace"
+    });
+
+    res.status(200).json({
+      workspace,
+      stats: {
+        boards,
+        members: workspace.members.length,
+        activities
+      }
+    });
+  } catch (error) {
+    console.error("getWorkspaceDetails error:", error.message);
+    res.status(500).json({ message: "Lỗi lấy chi tiết workspace" });
+  }
+};
+
+const deleteWorkspace = async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { permanent = false } = req.body;
@@ -391,7 +557,6 @@ exports.deleteWorkspace = async (req, res) => {
     }
 
     if (permanent) {
-      // Xóa tất cả boards trong workspace
       await Board.updateMany(
         { workspace: workspaceId },
         { $set: { isDeleted: true } }
@@ -440,10 +605,46 @@ exports.deleteWorkspace = async (req, res) => {
   }
 };
 
+const restoreWorkspace = async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const adminId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+      return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+    }
+
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace không tồn tại!" });
+    }
+
+    if (!workspace.isDeleted) {
+      return res.status(400).json({ message: "Workspace chưa bị xóa!" });
+    }
+
+    workspace.isDeleted = false;
+    await workspace.save();
+
+    const activity = new Activity({
+      user: adminId,
+      action: { category: "workspace", type: "restored_by_admin" },
+      target: workspaceId,
+      targetModel: "Workspace",
+      details: `Admin ${req.user.fullName} restored workspace "${workspace.name}"`
+    });
+    await activity.save();
+
+    res.status(200).json({ message: "Đã khôi phục workspace", workspace });
+  } catch (error) {
+    console.error("restoreWorkspace error:", error.message);
+    res.status(500).json({ message: "Lỗi khôi phục workspace" });
+  }
+};
+
 // ============= BOARD MANAGEMENT =============
 
-// Lấy tất cả boards
-exports.getAllBoards = async (req, res) => {
+const getAllBoards = async (req, res) => {
   try {
     const { page = 1, limit = 20, search } = req.query;
     
@@ -477,10 +678,134 @@ exports.getAllBoards = async (req, res) => {
   }
 };
 
+const getBoardDetails = async (req, res) => {
+  try {
+    const { boardId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(boardId)) {
+      return res.status(400).json({ message: "Board ID không hợp lệ!" });
+    }
+
+    const board = await Board.findById(boardId)
+      .populate("owner", "email fullName avatar")
+      .populate("members.user", "email fullName avatar")
+      .populate("workspace", "name")
+      .lean();
+
+    if (!board) {
+      return res.status(404).json({ message: "Board không tồn tại!" });
+    }
+
+    // Bổ sung stats
+    const lists = board.listOrderIds?.length || 0;
+    const activities = await Activity.countDocuments({
+      target: boardId,
+      targetModel: "Board"
+    });
+
+    res.status(200).json({
+      board,
+      stats: {
+        lists,
+        members: board.members.length,
+        activities
+      }
+    });
+  } catch (error) {
+    console.error("getBoardDetails error:", error.message);
+    res.status(500).json({ message: "Lỗi lấy chi tiết board" });
+  }
+};
+
+const deleteBoard = async (req, res) => {
+  try {
+    const { boardId } = req.params;
+    const { permanent = false } = req.body;
+    const adminId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(boardId)) {
+      return res.status(400).json({ message: "Board ID không hợp lệ!" });
+    }
+
+    const board = await Board.findById(boardId);
+    if (!board) {
+      return res.status(404).json({ message: "Board không tồn tại!" });
+    }
+
+    if (permanent) {
+      await board.deleteOne();
+      
+      const activity = new Activity({
+        user: adminId,
+        action: { category: "board", type: "permanently_deleted_by_admin" },
+        target: boardId,
+        targetModel: "Board",
+        details: `Admin ${req.user.fullName} permanently deleted board "${board.title}"`
+      });
+      await activity.save();
+
+      res.status(200).json({ message: "Đã xóa vĩnh viễn board" });
+    } else {
+      board.isDeleted = true;
+      await board.save();
+
+      const activity = new Activity({
+        user: adminId,
+        action: { category: "board", type: "deleted_by_admin" },
+        target: boardId,
+        targetModel: "Board",
+        details: `Admin ${req.user.fullName} deleted board "${board.title}"`
+      });
+      await activity.save();
+
+      res.status(200).json({ message: "Đã xóa board" });
+    }
+  } catch (error) {
+    console.error("deleteBoard error:", error.message);
+    res.status(500).json({ message: "Lỗi xóa board" });
+  }
+};
+
+const restoreBoard = async (req, res) => {
+  try {
+    const { boardId } = req.params;
+    const adminId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(boardId)) {
+      return res.status(400).json({ message: "Board ID không hợp lệ!" });
+    }
+
+    const board = await Board.findById(boardId);
+    if (!board) {
+      return res.status(404).json({ message: "Board không tồn tại!" });
+    }
+
+    if (!board.isDeleted) {
+      return res.status(400).json({ message: "Board chưa bị xóa!" });
+    }
+
+    board.isDeleted = false;
+    await board.save();
+
+    const activity = new Activity({
+      user: adminId,
+      action: { category: "board", type: "restored_by_admin" },
+      target: boardId,
+      targetModel: "Board",
+      details: `Admin ${req.user.fullName} restored board "${board.title}"`
+    });
+    await activity.save();
+
+    res.status(200).json({ message: "Đã khôi phục board", board });
+  } catch (error) {
+    console.error("restoreBoard error:", error.message);
+    res.status(500).json({ message: "Lỗi khôi phục board" });
+  }
+};
+
 // ============= INACTIVE USER CLEANUP =============
 
-// Lấy danh sách users không hoạt động
-exports.getInactiveUsers = async (req, res) => {
+const getInactiveUsers = async (req, res) => {
   try {
     const { days = 90 } = req.query;
     
@@ -502,8 +827,7 @@ exports.getInactiveUsers = async (req, res) => {
   }
 };
 
-// Gửi thông báo cho users không hoạt động
-exports.sendInactivityNotices = async (req, res) => {
+const sendInactivityNotices = async (req, res) => {
   try {
     const inactiveDate = new Date();
     inactiveDate.setDate(inactiveDate.getDate() - 90);
@@ -516,7 +840,7 @@ exports.sendInactivityNotices = async (req, res) => {
 
     let sentCount = 0;
     const deletionDate = new Date();
-    deletionDate.setDate(deletionDate.getDate() + 7); // Xóa sau 7 ngày
+    deletionDate.setDate(deletionDate.getDate() + 7);
 
     for (const user of users) {
       try {
@@ -529,7 +853,7 @@ exports.sendInactivityNotices = async (req, res) => {
             <p>Chúng tôi nhận thấy tài khoản của bạn đã không hoạt động trong hơn 90 ngày.</p>
             <p>Nếu bạn không đăng nhập trong vòng 7 ngày tới, tài khoản của bạn sẽ bị xóa vào <strong>${deletionDate.toLocaleDateString('vi-VN')}</strong>.</p>
             <p>Để giữ tài khoản, vui lòng đăng nhập vào hệ thống.</p>
-            <p>Trân trọng,<br>Trello Clone Team</p>
+            <p>Trân trọng,<br> APP Team</p>
           `
         });
 
@@ -552,8 +876,7 @@ exports.sendInactivityNotices = async (req, res) => {
   }
 };
 
-// Xóa users không hoạt động đã được thông báo
-exports.deleteInactiveUsers = async (req, res) => {
+const deleteInactiveUsers = async (req, res) => {
   try {
     const now = new Date();
 
@@ -566,12 +889,10 @@ exports.deleteInactiveUsers = async (req, res) => {
     let deletedCount = 0;
 
     for (const user of users) {
-      // Soft delete
       user.isHidden = true;
       user.isOnline = false;
       await user.save();
 
-      // Log activity
       const activity = new Activity({
         user: req.user._id,
         action: { category: "user", type: "auto_deleted_inactive" },
@@ -581,7 +902,6 @@ exports.deleteInactiveUsers = async (req, res) => {
       });
       await activity.save();
 
-      // Gửi email thông báo
       try {
         await sendEmail({
           to: user.email,
@@ -591,7 +911,7 @@ exports.deleteInactiveUsers = async (req, res) => {
             <p>Xin chào ${user.fullName},</p>
             <p>Tài khoản của bạn đã bị xóa do không hoạt động trong hơn 90 ngày.</p>
             <p>Nếu bạn muốn khôi phục tài khoản, vui lòng liên hệ với chúng tôi.</p>
-            <p>Trân trọng,<br>Trello Clone Team</p>
+            <p>Trân trọng,<br>APP Team</p>
           `
         });
       } catch (emailError) {
@@ -612,8 +932,7 @@ exports.deleteInactiveUsers = async (req, res) => {
 
 // ============= ACTIVITY LOGS =============
 
-// Lấy logs hoạt động của admin
-exports.getAdminActivityLogs = async (req, res) => {
+const getAdminActivityLogs = async (req, res) => {
   try {
     const { page = 1, limit = 50, type } = req.query;
     
@@ -646,4 +965,28 @@ exports.getAdminActivityLogs = async (req, res) => {
     console.error("getAdminActivityLogs error:", error.message);
     res.status(500).json({ message: "Lỗi lấy activity logs" });
   }
+};
+
+
+module.exports = {
+  getDashboardStats,
+  getAllUsers,
+  getUserDetails,
+  updateAdminStatus,
+  banUser,
+  unbanUser,
+  deleteUser,
+  restoreUser,
+  getAllWorkspaces,
+  getWorkspaceDetails,
+  deleteWorkspace,
+  restoreWorkspace,
+  getAllBoards,
+  getBoardDetails,
+  deleteBoard,
+  restoreBoard,
+  getInactiveUsers,
+  sendInactivityNotices,
+  deleteInactiveUsers,
+  getAdminActivityLogs
 };

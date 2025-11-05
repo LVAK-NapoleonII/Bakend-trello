@@ -48,7 +48,7 @@ const inviteMember = async (req, res) => {
       if (!user) {
         const inviteLink = `http://localhost:5173/invite/accept?boardId=${boardId}&email=${encodeURIComponent(email)}`;
         await transporter.sendMail({
-          from: `"Trello Clone" <${process.env.EMAIL_USER}>`,
+          from: `"APP TEAM" <${process.env.EMAIL_USER}>`,
           to: email,
           subject: `Lời mời tham gia bảng "${board.title}"`,
           html: `<p>Bạn được mời tham gia bảng "${board.title}" bởi ${req.user.fullName}.</p><p>Nhấn <a href="${inviteLink}">đây</a> để chấp nhận lời mời.</p>`,

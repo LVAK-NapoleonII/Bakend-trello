@@ -6,7 +6,7 @@ const activitySchema = new mongoose.Schema(
     action: {
       category: {
         type: String,
-        enum: ["workspace", "board", "list", "card", "checklist", "comment", "note", "member"],
+        enum: ["workspace", "board", "list", "card", "checklist", "comment", "note", "member","user"],
         required: true,
       },
       type: { type: String, required: true }, 
@@ -18,7 +18,7 @@ const activitySchema = new mongoose.Schema(
     },
     targetModel: {
       type: String,
-      enum: ["Workspace", "Board", "List", "Card"],
+      enum: ["Workspace", "Board", "List", "Card","User"],
       required: true,
     },
     isHidden: {

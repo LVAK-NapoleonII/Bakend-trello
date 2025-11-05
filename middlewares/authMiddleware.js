@@ -1,3 +1,4 @@
+// middlewares/authMiddleware.js - Updated with ban check
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
@@ -20,6 +21,29 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ message: "User không tồn tại!" });
     }
 
+    // Check if user is banned
+    await user.checkBanExpiry(); // Auto-unban if expired
+    
+    if (user.isBanned) {
+      const message = user.banExpiresAt 
+        ? `Tài khoản của bạn đã bị khóa đến ${user.banExpiresAt.toLocaleDateString('vi-VN')}. Lý do: ${user.banReason}`
+        : `Tài khoản của bạn đã bị khóa vĩnh viễn. Lý do: ${user.banReason}`;
+      
+      return res.status(403).json({ 
+        message,
+        isBanned: true,
+        banReason: user.banReason,
+        bannedAt: user.bannedAt,
+        banExpiresAt: user.banExpiresAt
+      });
+    }
+
+    // Check if user is hidden (deleted)
+    if (user.isHidden) {
+      return res.status(403).json({ message: "Tài khoản đã bị xóa!" });
+    }
+
+    // Update last active
     user.lastActive = new Date();
     await user.save();
 

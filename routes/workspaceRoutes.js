@@ -327,7 +327,7 @@ module.exports = (io) => {
    *                 example: "Backend Team"
    *               description:
    *                 type: string
-   *                 example: "Nhóm phụ trách backend hệ thống Trello clone"
+   *                 example: "Nhóm phụ trách backend hệ thống APP TEAM"
    *               background:
    *                 type: string
    *                 example: "#ffffff"

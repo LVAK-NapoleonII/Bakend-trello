@@ -97,6 +97,7 @@ const login = async (req, res) => {
         email: user.email,
         avatar: user.avatar,
         isOnline: user.isOnline,
+        isAdmin: user.isAdmin,
       },
     });
   } catch (error) {
@@ -107,7 +108,7 @@ const login = async (req, res) => {
 
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("_id fullName email avatar isOnline");
+    const user = await User.findById(req.user._id)
     if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
 
     res.status(200).json({ user });

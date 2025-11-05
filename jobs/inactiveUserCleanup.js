@@ -62,7 +62,7 @@ const sendInactivityNotices = async () => {
           <body>
             <div class="container">
               <div class="header">
-                <h1>Trello Clone</h1>
+                <h1>APP TEAM</h1>
               </div>
               <div class="content">
                 <h2>⚠️ Tài khoản của bạn đang không hoạt động</h2>
@@ -89,7 +89,7 @@ const sendInactivityNotices = async () => {
               </div>
               <div class="footer">
                 <p>Đây là email tự động, vui lòng không trả lời.</p>
-                <p>&copy; 2025 Trello Clone. All rights reserved.</p>
+                <p>&copy; 2025 APP TEAM. All rights reserved.</p>
               </div>
             </div>
           </body>
@@ -182,7 +182,7 @@ const deleteScheduledUsers = async () => {
                 <p>Cảm ơn bạn đã sử dụng dịch vụ của chúng tôi.</p>
               </div>
               <div class="footer">
-                <p>&copy; 2025 Trello Clone. All rights reserved.</p>
+                <p>&copy; 2025 APP TEAM. All rights reserved.</p>
               </div>
             </div>
           </body>

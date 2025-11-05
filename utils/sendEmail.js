@@ -12,7 +12,7 @@ const transporter = nodemailer.createTransport({
 const sendEmail = async ({ to, subject, html }) => {
   try {
     const mailOptions = {
-      from: `"Trello Clone" <${process.env.EMAIL_USER}>`,
+      from: `"APP TEAM" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,

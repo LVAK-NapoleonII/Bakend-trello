@@ -38,6 +38,7 @@ const userSchema = new mongoose.Schema({
 // Index để tìm kiếm user không hoạt động
 userSchema.index({ lastActive: 1, isHidden: false });
 userSchema.index({ isAdmin: 1 });
+userSchema.index({ isBanned: 1 });
 
 userSchema.pre("save", async function (next) {
   if (this.isModified("password")) {
@@ -54,6 +55,17 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 userSchema.methods.updateLastActive = function() {
   this.lastActive = new Date();
   return this.save();
+};
+
+userSchema.methods.checkBanExpiry = function() {
+  if (this.isBanned && this.banExpiresAt && this.banExpiresAt < new Date()) {
+    this.isBanned = false;
+    this.banReason = null;
+    this.bannedAt = null;
+    this.banExpiresAt = null;
+    return this.save();
+  }
+  return Promise.resolve(this);
 };
 
 module.exports = mongoose.model("User", userSchema);
