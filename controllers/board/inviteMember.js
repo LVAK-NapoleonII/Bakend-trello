@@ -14,127 +14,159 @@ const transporter = nodemailer.createTransport({
 const inviteMember = async (req, res) => {
   try {
     const { boardId } = req.params;
-    const { email, userId } = req.body;
+    const { email, userIds = [] } = req.body; 
     const actorId = req.user?._id;
+
     if (!actorId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(boardId)) return res.status(400).json({ message: "Board ID không hợp lệ!" });
-    if (!email && !userId) return res.status(400).json({ message: "Email hoặc userId là bắt buộc!" });
+    if (!email && userIds.length === 0) return res.status(400).json({ message: "Email hoặc userIds là bắt buộc!" });
 
     const board = await Board.findOne({ _id: boardId, isDeleted: false });
     if (!board) return res.status(404).json({ message: "Không tìm thấy bảng!" });
     if (board.owner.toString() !== actorId.toString()) return res.status(403).json({ message: "Chỉ chủ phòng mới có quyền mời!" });
 
-    let user;
-    let isNewInvitation = false;
+    const workspace = await Workspace.findById(board.workspace);
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
 
-    if (userId) {
-      if (!mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ message: "User ID không hợp lệ!" });
-      user = await User.findById(userId);
-      if (!user) return res.status(404).json({ message: "Không tìm thấy người dùng!" });
+    const invitedUsers = []; // ← Danh sách người được mời thành công
+    const errors = [];       // ← Lỗi từng người
 
-      const existingMember = board.members.find((m) => m.user.toString() === user._id.toString());
-      if (existingMember) {
-        if (existingMember.isActive) return res.status(400).json({ message: "Người dùng đã là thành viên!" });
-        existingMember.isActive = true;
-      } else {
-        board.members.push({ user: user._id, isActive: true });
-        isNewInvitation = true;
-      }
+    // === XỬ LÝ MỜI BẰNG EMAIL ===
+    if (email) {
+      const trimmedEmail = email.trim().toLowerCase();
+      let user = await User.findOne({ email: trimmedEmail });
 
-      const isAlreadyInvited = board.invitedUsers.some((i) => i.user?.toString() === user._id.toString() && i.isActive);
-      if (isAlreadyInvited) return res.status(400).json({ message: "Người dùng đã được mời!" });
-    } else {
-      user = await User.findOne({ email });
       if (!user) {
-        const inviteLink = `http://localhost:5173/invite/accept?boardId=${boardId}&email=${encodeURIComponent(email)}`;
+        const inviteLink = `http://localhost:5173/invite/accept?boardId=${boardId}&email=${encodeURIComponent(trimmedEmail)}`;
         await transporter.sendMail({
           from: `"APP TEAM" <${process.env.EMAIL_USER}>`,
-          to: email,
+          to: trimmedEmail,
           subject: `Lời mời tham gia bảng "${board.title}"`,
-          html: `<p>Bạn được mời tham gia bảng "${board.title}" bởi ${req.user.fullName}.</p><p>Nhấn <a href="${inviteLink}">đây</a> để chấp nhận lời mời.</p>`,
+          html: `<p>Bạn được mời tham gia bảng "<strong>${board.title}</strong>" bởi <strong>${req.user.fullName}</strong>.</p>
+                 <p>Nhấn <a href="${inviteLink}" style="color:blue;">vào đây</a> để chấp nhận lời mời.</p>`,
         });
-        board.invitedUsers.push({ user: null, email, isActive: true, invitedAt: new Date() });
-        await board.save();
-        return res.status(200).json({ message: `Đã gửi lời mời tới ${email}!`, board });
-      }
 
-      const existingMember = board.members.find((m) => m.user.toString() === user._id.toString());
-      if (existingMember) {
-        if (existingMember.isActive) return res.status(400).json({ message: "Người dùng đã là thành viên!" });
-        existingMember.isActive = true;
+        const existingInvite = board.invitedUsers.find(i => i.email === trimmedEmail && i.isActive);
+        if (!existingInvite) {
+          board.invitedUsers.push({ user: null, email: trimmedEmail, isActive: true, invitedAt: new Date() });
+        }
+
+        invitedUsers.push({ email: trimmedEmail, status: "invited" });
       } else {
-        board.members.push({ user: user._id, isActive: true });
-        isNewInvitation = true;
+        // Người dùng tồn tại → xử lý như userIds
+        userIds.push(user._id.toString());
       }
-
-      const isAlreadyInvited = board.invitedUsers.some((i) => i.user?.toString() === user._id.toString() && i.isActive);
-      if (isAlreadyInvited) return res.status(400).json({ message: "Người dùng đã được mời!" });
     }
 
-    if (isNewInvitation) {
-      const workspace = await Workspace.findById(board.workspace);
-      if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
-      if (!workspace.members.includes(user._id)) workspace.members.push(user._id);
+    // === XỬ LÝ MỜI BẰNG USERIDS (mảng) ===
+    const validUserIds = userIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    const uniqueUserIds = [...new Set(validUserIds)]; // Loại trùng
 
-      const activity = new Activity({
-        user: actorId,
-        action: { category: "member", type: "invited" },
-        target: board._id,
-        targetModel: "Board",
-        details: `User ${req.user.fullName} invited ${user.fullName} to board "${board.title}"`,
-      });
-      await activity.save();
-      board.activities.push(activity._id);
-      workspace.activities.push(activity._id);
+    for (const userId of uniqueUserIds) {
+      try {
+        const user = await User.findById(userId);
+        if (!user) {
+          errors.push({ userId, error: "Không tìm thấy người dùng" });
+          continue;
+        }
 
-      const notification = new Notification({
-        user: user._id,
-        message: `Bạn đã được mời vào bảng "${board.title}" bởi ${req.user.fullName}`,
-        type: "activity",
-        target: board._id,
-        targetModel: "Board",
-        isRead: false,
-        isHidden: false,
-      });
-      await notification.save();
+        // Kiểm tra đã là thành viên active?
+        const existingMember = board.members.find(m => m.user.toString() === userId && m.isActive);
+        if (existingMember) {
+          errors.push({ userId, error: "Đã là thành viên" });
+          continue;
+        }
 
-      await Promise.all([board.save(), workspace.save(), user.save()]);
+        // Kích hoạt lại nếu từng bị xóa
+        const inactiveMember = board.members.find(m => m.user.toString() === userId && !m.isActive);
+        if (inactiveMember) {
+          inactiveMember.isActive = true;
+        } else {
+          board.members.push({ user: user._id, isActive: true });
+        }
 
-      const updatedBoard = await Board.findById(boardId)
-        .populate("members.user", "email avatar fullName isOnline")
-        .populate("invitedUsers.user", "email avatar fullName isOnline")
-        .populate("owner", "email fullName _id isOnline");
+        // Xóa khỏi invitedUsers nếu có
+        board.invitedUsers = board.invitedUsers.filter(i => i.user?.toString() !== userId);
 
-      const io = req.app.get("io");
-      if (io) {
-        io.to(boardId).emit("member-invited", {
-          board: updatedBoard,
-          invitedUser: { _id: user._id, fullName: user.fullName, email: user.email, isOnline: user.isOnline },
+        // Thêm vào workspace nếu chưa có
+        if (!workspace.members.includes(user._id)) {
+          workspace.members.push(user._id);
+        }
+
+        // Ghi activity
+        const activity = new Activity({
+          user: actorId,
+          action: { category: "member", type: "invited" },
+          target: board._id,
+          targetModel: "Board",
+          details: `${req.user.fullName} mời ${user.fullName} vào bảng "${board.title}"`,
         });
-        io.to(user._id.toString()).emit("new-notification", notification);
-      }
+        await activity.save();
+        board.activities.push(activity._id);
+        workspace.activities.push(activity._id);
 
-      res.status(200).json({ message: "Đã mời thành viên thành công!", board: updatedBoard });
-    } else {
-      await board.save();
-      const updatedBoard = await Board.findById(boardId)
-        .populate("members.user", "email avatar fullName isOnline")
-        .populate("invitedUsers.user", "email avatar fullName isOnline")
-        .populate("owner", "email fullName _id isOnline");
-
-      const io = req.app.get("io");
-      if (io) {
-        io.to(boardId).emit("member-invited", {
-          board: updatedBoard,
-          invitedUser: { _id: user._id, fullName: user.fullName, email: user.email, isOnline: user.isOnline },
+        // Gửi notification
+        const notification = new Notification({
+          user: user._id,
+          message: `Bạn được mời vào bảng "${board.title}" bởi ${req.user.fullName}`,
+          type: "activity",
+          target: board._id,
+          targetModel: "Board",
+          isRead: false,
+          isHidden: false,
         });
-      }
+        await notification.save();
 
-      res.status(200).json({ message: "Đã kích hoạt lại thành viên thành công!", board: updatedBoard });
+        invitedUsers.push({
+          _id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          status: "added"
+        });
+
+      } catch (err) {
+        errors.push({ userId, error: err.message });
+      }
     }
+
+    // Lưu tất cả
+    await Promise.all([board.save(), workspace.save()]);
+
+    // Populate lại board
+    const updatedBoard = await Board.findById(boardId)
+      .populate("members.user", "email avatar fullName isOnline")
+      .populate("invitedUsers.user", "email avatar fullName isOnline")
+      .populate("owner", "email fullName _id isOnline");
+
+    // Gửi socket
+    const io = req.app.get("io");
+    if (io) {
+      io.to(boardId).emit("member-invited", { board: updatedBoard });
+      invitedUsers.forEach(u => {
+        if (u._id) {
+          io.to(u._id.toString()).emit("new-notification", {
+            message: `Bạn được mời vào bảng "${board.title}"`,
+            target: board._id,
+          });
+        }
+      });
+    }
+
+    // Trả về kết quả chi tiết
+    res.status(200).json({
+      message: "Mời thành viên hoàn tất!",
+      board: updatedBoard,
+      summary: {
+        invited: invitedUsers.length,
+        errors: errors.length
+      },
+      invitedUsers,
+      errors
+    });
+
   } catch (error) {
-    console.error("inviteMember error:", error.message);
-    res.status(500).json({ message: "Lỗi server khi mời thành viên!" });
+    console.error("inviteMember error:", error);
+    res.status(500).json({ message: "Lỗi server!" });
   }
 };
 

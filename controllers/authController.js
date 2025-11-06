@@ -239,55 +239,21 @@ const logout = async (req, res) => {
 const searchUsers = async (req, res) => {
   try {
     const { query, boardId, onlyActiveMembers } = req.query;
-    console.log("SearchUsers called with:", { query, boardId, onlyActiveMembers, userId: req.user._id });
+    const currentUserId = req.user?._id?.toString();
 
+    console.log("searchUsers called with:", { query, boardId, onlyActiveMembers, currentUserId });
+
+    if (!currentUserId) {
+      return res.status(401).json({ message: "Không xác thực!" });
+    }
+
+    // Hàm escape regex
+    const escapeRegex = (string) => {
+      return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    };
+
+    // === TRƯỜNG HỢP 1: LẤY CHỈ ACTIVE MEMBERS ===
     if (onlyActiveMembers === "true" && boardId) {
-      if (!mongoose.Types.ObjectId.isValid(boardId)) {
-        return res.status(400).json({ message: "boardId không hợp lệ!" });
-      }
-
-      const board = await Board.findById(boardId).populate(
-        "members.user",
-        "_id email fullName avatar isOnline"
-      );
-      console.log("Board:", board);
-      if (!board) {
-        return res.status(404).json({ message: "Bảng không tồn tại!" });
-      }
-
-      // Kiểm tra cả owner và members
-      const isOwner = board.owner.toString() === req.user._id.toString();
-      const isMember = board.members.some(
-        (m) => m.user.toString() === req.user._id.toString() && m.isActive
-      );
-      if (!isOwner && !isMember) {
-        console.log("Access denied - User is neither owner nor active member");
-        return res.status(403).json({ message: "Bạn không có quyền truy cập bảng này!" });
-      }
-
-      const users = board.members
-        .filter((m) => m.isActive)
-        .map((m) => ({
-          ...m.user.toObject(),
-          isPastMember: false,
-        }));
-
-      return res.status(200).json({ users });
-    }
-
-    if (!query) {
-      return res.status(400).json({ message: "Query là bắt buộc!" });
-    }
-
-    const users = await User.find({
-      $or: [
-        { email: { $regex: query, $options: "i" } },
-        { fullName: { $regex: query, $options: "i" } },
-      ],
-    }).select("_id email fullName avatar isOnline");
-
-    let pastMembers = [];
-    if (boardId) {
       if (!mongoose.Types.ObjectId.isValid(boardId)) {
         return res.status(400).json({ message: "boardId không hợp lệ!" });
       }
@@ -297,28 +263,67 @@ const searchUsers = async (req, res) => {
         return res.status(404).json({ message: "Bảng không tồn tại!" });
       }
 
-      const isOwner = board.owner.toString() === req.user._id.toString();
+      const isOwner = board.owner.toString() === currentUserId;
       const isMember = board.members.some(
-        (m) => m.user.toString() === req.user._id.toString() && m.isActive
+        (m) => m.user?.toString() === currentUserId && m.isActive
       );
+
       if (!isOwner && !isMember) {
-        console.log("Access denied - User is neither owner nor active member");
-        return res.status(403).json({ message: "Bạn không có quyền truy cập bảng này!" });
+        return res.status(403).json({ message: "Không có quyền!" });
       }
 
-      pastMembers = board.members
-        .filter((m) => !m.isActive)
-        .map((m) => m.user.toString());
+      const activeMemberIds = board.members
+        .filter((m) => m.isActive && m.user)
+        .map((m) => m.user);
+
+      const users = await User.find({ _id: { $in: activeMemberIds } })
+        .select("_id email fullName avatar isOnline")
+        .lean();
+
+      return res.status(200).json({ users });
     }
 
-    const enrichedUsers = users.map((user) => ({
-      ...user.toObject(),
-      isPastMember: pastMembers.includes(user._id.toString()),
-    }));
+    // === TRƯỜNG HỢP 2: TÌM KIẾM THEO QUERY ===
+    if (!query?.trim()) {
+      return res.status(400).json({ message: "Query là bắt buộc!" });
+    }
 
-    res.status(200).json({ users: enrichedUsers });
+    const safeQuery = escapeRegex(query.trim());
+
+    let users = await User.find({
+      $or: [
+        { email: { $regex: safeQuery, $options: "i" } },
+        { fullName: { $regex: safeQuery, $options: "i" } },
+      ],
+    })
+      .select("_id email fullName avatar isOnline")
+      .lean();
+
+    // Nếu có boardId → thêm isPastMember
+    if (boardId && mongoose.Types.ObjectId.isValid(boardId)) {
+      const board = await Board.findById(boardId);
+      if (board) {
+        const isOwner = board.owner.toString() === currentUserId;
+        const isMember = board.members.some(
+          (m) => m.user?.toString() === currentUserId && m.isActive
+        );
+
+        if (isOwner || isMember) {
+          const pastMemberIds = board.members
+            .filter((m) => !m.isActive && m.user)
+            .map((m) => m.user.toString());
+
+          users = users.map((user) => ({
+            ...user,
+            isPastMember: pastMemberIds.includes(user._id.toString()),
+          }));
+        }
+      }
+    }
+
+    res.status(200).json({ users });
   } catch (error) {
-    console.error("Search users error:", error.message);
+    console.error("searchUsers error:", error);
     res.status(500).json({ message: "Lỗi server" });
   }
 };

@@ -71,7 +71,6 @@ module.exports = (io) => {
     socket.on("workspace-created", (data) => {
       console.log(`[Socket] workspace-created received from user ${userId}:`, data);
       
-      // Emit tới tất cả users trong workspace và user hiện tại
       io.emit("workspace-created", {
         workspace: data.workspace,
         message: data.message || `Workspace "${data.workspace.name}" đã được tạo.`,
@@ -84,13 +83,11 @@ module.exports = (io) => {
     socket.on("workspace-updated", (data) => {
       console.log(`[Socket] workspace-updated received from user ${userId}:`, data);
       
-      // Emit tới workspace room và tất cả users
       io.to(data.workspace._id).emit("workspace-updated", {
         workspace: data.workspace,
         updatedBy: userId
       });
       
-      // Emit tới tất cả users để update sidebar
       io.emit("workspace-updated", {
         workspace: data.workspace,
         updatedBy: userId
@@ -102,7 +99,6 @@ module.exports = (io) => {
     socket.on("workspace-hidden", (data) => {
       console.log(`[Socket] workspace-hidden received from user ${userId}:`, data);
       
-      // Emit tới tất cả users để remove workspace khỏi sidebar
       io.emit("workspace-hidden", {
         workspaceId: data.workspaceId,
         message: data.message,
@@ -115,7 +111,6 @@ module.exports = (io) => {
     socket.on("workspace-restored", (data) => {
       console.log(`[Socket] workspace-restored received from user ${userId}:`, data);
       
-      // Emit tới tất cả users để add workspace vào sidebar
       io.emit("workspace-restored", {
         workspace: data.workspace,
         workspaceId: data.workspaceId,
@@ -130,7 +125,7 @@ module.exports = (io) => {
       const { board } = data;
       if (board.workspace) {
         io.to(board.workspace.toString()).emit("board-created", { board });
-        io.emit("board-created", { board }); // Emit global để HomePage cập nhật
+        io.emit("board-created", { board });
       }
     });
 
@@ -168,22 +163,80 @@ module.exports = (io) => {
       io.to(cardId).emit("member-added", { cardId, members });
     });
 
-    // socket.on("comment-added", ({ cardId, comment }) => {
-    //   io.to(cardId).emit("comment-added", { cardId, comment });
-    // });
+    socket.on("comment-added", ({ cardId, comment }) => {
+      console.log(`[Socket] comment-added received for card ${cardId}:`, comment);
+      
+      // Broadcast to all clients in the card room
+      io.to(cardId).emit("comment-added", { 
+        cardId, 
+        comment: {
+          _id: comment._id,
+          text: comment.text,
+          user: {
+            _id: comment.user?._id || comment.user,
+            fullName: comment.user?.fullName,
+            avatar: comment.user?.avatar,
+            email: comment.user?.email,
+          },
+          createdAt: comment.createdAt || new Date().toISOString(),
+          isHidden: false
+        }
+      });
+      
+      console.log(`[Socket] comment-added broadcasted to card room ${cardId}`);
+    });
 
-    // socket.on("comment-hidden", ({ cardId, commentId, actorId }) => {
-    //   if (actorId !== userId) return;
-    //   io.to(cardId).emit("comment-hidden", { cardId, commentId, actorId });
-    // });
+    socket.on("comment-hidden", ({ cardId, commentId, actorId }) => {
+      console.log(`[Socket] comment-hidden received for card ${cardId}, comment ${commentId}`);
+      
+      if (actorId !== userId) return;
+      
+      // Broadcast to all clients in the card room
+      io.to(cardId).emit("comment-hidden", { 
+        cardId, 
+        commentId, 
+        actorId 
+      });
+      
+      console.log(`[Socket] comment-hidden broadcasted to card room ${cardId}`);
+    });
 
     socket.on("note-added", ({ cardId, note }) => {
-      io.to(cardId).emit("note-added", { cardId, note });
+      console.log(`[Socket] note-added received for card ${cardId}:`, note);
+      
+      // Broadcast to all clients in the card room
+      io.to(cardId).emit("note-added", { 
+        cardId, 
+        note: {
+          _id: note._id,
+          content: note.content,
+          createdBy: {
+            _id: note.createdBy?._id || note.createdBy,
+            fullName: note.createdBy?.fullName,
+            avatar: note.createdBy?.avatar,
+            email: note.createdBy?.email,
+          },
+          createdAt: note.createdAt || new Date().toISOString(),
+          isHidden: false
+        }
+      });
+      
+      console.log(`[Socket] note-added broadcasted to card room ${cardId}`);
     });
 
     socket.on("note-hidden", ({ cardId, noteId, actorId }) => {
+      console.log(`[Socket] note-hidden received for card ${cardId}, note ${noteId}`);
+      
       if (actorId !== userId) return;
-      io.to(cardId).emit("note-hidden", { cardId, noteId, actorId });
+      
+      // Broadcast to all clients in the card room
+      io.to(cardId).emit("note-hidden", { 
+        cardId, 
+        noteId, 
+        actorId 
+      });
+      
+      console.log(`[Socket] note-hidden broadcasted to card room ${cardId}`);
     });
 
     socket.on("checklist-added", ({ cardId, checklist }) => {
@@ -210,12 +263,10 @@ module.exports = (io) => {
     socket.on("member-deactivated", (data) => {
       console.log(`[Socket] member-deactivated received:`, data);
       
-      // Emit tới user bị deactivate
       if (data.deactivatedUserId) {
         io.to(data.deactivatedUserId).emit("member-deactivated", data);
       }
       
-      // Emit tới workspace nếu có
       if (data.board?.workspace?._id) {
         io.to(data.board.workspace._id).emit("member-deactivated", data);
       }
