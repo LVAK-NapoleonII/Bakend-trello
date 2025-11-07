@@ -3,57 +3,38 @@ const List = require("../models/List");
 const Board = require("../models/Board");
 const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
-
-// Helper function để kiểm tra quyền truy cập board (giống như trong boardController)
-const checkBoardAccess = async (boardId, userId) => {
-  const board = await Board.findOne({ _id: boardId, isDeleted: false })
-    .populate("workspace", "members");
-  
-  if (!board) return { hasAccess: false, board: null, reason: "Board không tồn tại" };
-
-  // Nếu là owner thì luôn có quyền
-  if (board.owner.toString() === userId.toString()) {
-    return { hasAccess: true, board, reason: "owner" };
-  }
-
-  // Nếu board là public, kiểm tra xem user có phải member của workspace không
-  if (board.visibility === "public") {
-    const isWorkspaceMember = board.workspace.members.some(
-      memberId => memberId.toString() === userId.toString()
-    );
-    if (isWorkspaceMember) {
-      return { hasAccess: true, board, reason: "workspace_member" };
-    }
-  }
-
-  // Nếu board là private hoặc user không phải workspace member, kiểm tra board membership
-  const isBoardMember = board.members.some(
-    member => member.user.toString() === userId.toString() && member.isActive
-  );
-  
-  if (isBoardMember) {
-    return { hasAccess: true, board, reason: "board_member" };
-  }
-
-  return { hasAccess: false, board, reason: "no_permission" };
-};
+const checkBoardAccess = require("../helpers/checkBoardAccess");
 
 const createList = async (req, res) => {
   try {
     const { title, board, position } = req.body;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin người dùng!" });
-    if (!title || !board) return res.status(400).json({ message: "Title và board là bắt buộc!" });
-    if (!mongoose.Types.ObjectId.isValid(board)) return res.status(400).json({ message: "Board ID không hợp lệ!" });
-
-    // Sử dụng helper function để kiểm tra quyền truy cập
-    const { hasAccess, board: boardExists, reason } = await checkBoardAccess(board, userId);
     
-    if (!hasAccess) {
+    if (!userId) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin người dùng!" });
+    }
+    if (!title || !board) {
+      return res.status(400).json({ message: "Title và board là bắt buộc!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(board)) {
+      return res.status(400).json({ message: "Board ID không hợp lệ!" });
+    }
+
+    // Kiểm tra quyền truy cập board
+    const { canView, canEdit, board: boardExists, reason } = await checkBoardAccess(board, userId);
+    
+    if (!canView) {
       if (reason === "Board không tồn tại") {
         return res.status(404).json({ message: reason });
       }
-      return res.status(403).json({ message: "Bạn không có quyền tạo cột trong board này!" });
+      return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
+    }
+
+    // Chỉ owner và board member mới được tạo list
+    if (!canEdit) {
+      return res.status(403).json({ 
+        message: "Bạn không có quyền tạo cột trong board này! Chỉ owner và member mới có quyền này." 
+      });
     }
 
     const newList = await List.create({
@@ -78,6 +59,7 @@ const createList = async (req, res) => {
       details: `User ${req.user.fullName} created list "${title}" in board "${boardExists.title}"`,
     });
     await activity.save();
+    
     newList.activities.push(activity._id);
     boardExists.activities = boardExists.activities || [];
     boardExists.activities.push(activity._id);
@@ -98,7 +80,9 @@ const createList = async (req, res) => {
             isRead: false,
             isHidden: false,
           });
-          return notification.save().then(() => io.to(member.user.toString()).emit("new-notification", notification));
+          return notification.save().then(() => 
+            io.to(member.user.toString()).emit("new-notification", notification)
+          );
         });
       await Promise.all(notificationPromises);
 
@@ -119,19 +103,25 @@ const getListsByBoard = async (req, res) => {
   try {
     const { boardId } = req.params;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    if (!mongoose.Types.ObjectId.isValid(boardId)) return res.status(400).json({ message: "Board ID không hợp lệ!" });
-
-    // Sử dụng helper function để kiểm tra quyền truy cập
-    const { hasAccess, board, reason } = await checkBoardAccess(boardId, userId);
     
-    if (!hasAccess) {
+    if (!userId) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(boardId)) {
+      return res.status(400).json({ message: "Board ID không hợp lệ!" });
+    }
+
+    // Kiểm tra quyền truy cập board
+    const { canView, board, reason } = await checkBoardAccess(boardId, userId);
+    
+    if (!canView) {
       if (reason === "Board không tồn tại") {
         return res.status(404).json({ message: reason });
       }
       return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
     }
 
+    // Người có quyền view được phép xem lists
     const lists = await List.find({ board: boardId, isDeleted: false }).populate({
       path: "activities",
       match: { isHidden: false },
@@ -155,20 +145,37 @@ const updateList = async (req, res) => {
     const { id: listId } = req.params;
     const { title, position } = req.body;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    if (!mongoose.Types.ObjectId.isValid(listId)) return res.status(400).json({ message: "List ID không hợp lệ!" });
-    if (title && typeof title !== "string") return res.status(400).json({ message: "Title phải là chuỗi!" });
+    
+    if (!userId) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(listId)) {
+      return res.status(400).json({ message: "List ID không hợp lệ!" });
+    }
+    if (title && typeof title !== "string") {
+      return res.status(400).json({ message: "Title phải là chuỗi!" });
+    }
     if (position !== undefined && (typeof position !== "number" || position < 0)) {
       return res.status(400).json({ message: "Position phải là số không âm!" });
     }
 
     const list = await List.findOne({ _id: listId, isDeleted: false });
-    if (!list) return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
+    if (!list) {
+      return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
+    }
 
-    // Sử dụng helper function để kiểm tra quyền truy cập board
-    const { hasAccess, board } = await checkBoardAccess(list.board, userId);
-    if (!hasAccess) {
-      return res.status(403).json({ message: "Bạn không có quyền cập nhật cột này!" });
+    // Kiểm tra quyền truy cập board
+    const { canView, canEdit, board } = await checkBoardAccess(list.board, userId);
+    
+    if (!canView) {
+      return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
+    }
+
+    // Chỉ owner và board member mới được sửa list
+    if (!canEdit) {
+      return res.status(403).json({ 
+        message: "Bạn không có quyền cập nhật cột này! Chỉ owner và member mới có quyền này." 
+      });
     }
 
     const updateData = {};
@@ -179,7 +186,10 @@ const updateList = async (req, res) => {
       path: "activities",
       match: { isHidden: false },
     });
-    if (!updatedList) return res.status(404).json({ message: "Không tìm thấy cột!" });
+    
+    if (!updatedList) {
+      return res.status(404).json({ message: "Không tìm thấy cột!" });
+    }
 
     const activity = new Activity({
       user: userId,
@@ -189,6 +199,7 @@ const updateList = async (req, res) => {
       details: `User ${req.user.fullName} updated list "${updatedList.title}" in board "${board.title}"`,
     });
     await activity.save();
+    
     updatedList.activities.push(activity._id);
     board.activities.push(activity._id);
     await Promise.all([updatedList.save(), board.save()]);
@@ -208,7 +219,9 @@ const updateList = async (req, res) => {
             isRead: false,
             isHidden: false,
           });
-          return notification.save().then(() => io.to(member.user.toString()).emit("new-notification", notification));
+          return notification.save().then(() => 
+            io.to(member.user.toString()).emit("new-notification", notification)
+          );
         });
       await Promise.all(notificationPromises);
 

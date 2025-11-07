@@ -1,28 +1,43 @@
 const mongoose = require("mongoose");
 const List = require("../../models/List");
-const Board = require("../../models/Board");
 const Card = require("../../models/Card");
 const Activity = require("../../models/Activity");
+const checkBoardAccess = require("../../helpers/checkBoardAccess");
 
 const updateCardOrder = async (req, res) => {
   try {
     const { listId } = req.params;
     const { cardOrder } = req.body;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin người dùng!" });
-    if (!mongoose.Types.ObjectId.isValid(listId)) return res.status(400).json({ message: "List ID không hợp lệ!" });
-    if (!Array.isArray(cardOrder)) return res.status(400).json({ message: "Danh sách thứ tự thẻ không hợp lệ!" });
+    
+    if (!userId) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin người dùng!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(listId)) {
+      return res.status(400).json({ message: "List ID không hợp lệ!" });
+    }
+    if (!Array.isArray(cardOrder)) {
+      return res.status(400).json({ message: "Danh sách thứ tự thẻ không hợp lệ!" });
+    }
 
     const list = await List.findOne({ _id: listId, isDeleted: false });
-    if (!list) return res.status(404).json({ message: "List không tồn tại hoặc đã bị ẩn!" });
+    if (!list) {
+      return res.status(404).json({ message: "List không tồn tại hoặc đã bị ẩn!" });
+    }
 
-    const board = await Board.findOne({
-      _id: list.board,
-      isDeleted: false,
-      "members.user": userId,
-      "members.isActive": true,
-    });
-    if (!board) return res.status(403).json({ message: "Bạn không có quyền cập nhật list này!" });
+    // Kiểm tra quyền truy cập board
+    const { canView, canEdit, board } = await checkBoardAccess(list.board, userId);
+    
+    if (!canView) {
+      return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
+    }
+
+    // Chỉ owner và board member mới được sắp xếp cards
+    if (!canEdit) {
+      return res.status(403).json({ 
+        message: "Bạn không có quyền sắp xếp thẻ trong list này! Chỉ owner và member mới có quyền này." 
+      });
+    }
 
     if (cardOrder.length > 0) {
       for (const cardId of cardOrder) {
@@ -30,7 +45,9 @@ const updateCardOrder = async (req, res) => {
           return res.status(400).json({ message: `Card ID ${cardId} không hợp lệ!` });
         }
         const card = await Card.findOne({ _id: cardId, isDeleted: false });
-        if (!card) return res.status(404).json({ message: `Card ${cardId} không tồn tại hoặc đã bị ẩn!` });
+        if (!card) {
+          return res.status(404).json({ message: `Card ${cardId} không tồn tại hoặc đã bị ẩn!` });
+        }
         if (card.list.toString() !== listId) {
           return res.status(400).json({ message: `Card ${cardId} không thuộc list này!` });
         }

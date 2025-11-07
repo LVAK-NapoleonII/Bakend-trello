@@ -4,34 +4,58 @@ const Board = require("../../models/Board");
 const Card = require("../../models/Card");
 const Activity = require("../../models/Activity");
 const Notification = require("../../models/Notification");
+const checkBoardAccess = require("../../helpers/checkBoardAccess");
 
 const deleteList = async (req, res) => {
   try {
     const { id: listId } = req.params;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    if (!mongoose.Types.ObjectId.isValid(listId)) return res.status(400).json({ message: "List ID không hợp lệ!" });
-
-    const list = await List.findOne({ _id: listId, isDeleted: false });
-    if (!list) return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
-
-    const board = await Board.findOne({ _id: list.board, isDeleted: false });
-    if (!board) return res.status(404).json({ message: "Board không tồn tại hoặc đã bị ẩn!" });
-
-    const isMember = board.members.some((m) => m.user?.toString() === userId.toString() && m.isActive);
-    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền xóa cột này!" });
-    if (board.owner.toString() !== userId.toString()) {
-      return res.status(403).json({ message: "Chỉ chủ board mới có quyền xóa cột!" });
+    
+    if (!userId) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(listId)) {
+      return res.status(400).json({ message: "List ID không hợp lệ!" });
     }
 
-    await Card.updateMany({ list: list._id, isDeleted: false }, { $set: { isDeleted: true } });
+    const list = await List.findOne({ _id: listId, isDeleted: false });
+    if (!list) {
+      return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
+    }
 
+    // Kiểm tra quyền truy cập board
+    const { canView, canEdit, board, role } = await checkBoardAccess(list.board, userId);
+    
+    if (!canView) {
+      return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
+    }
+
+    // Chỉ owner và board member mới được xóa list
+    if (!canEdit) {
+      return res.status(403).json({ 
+        message: "Bạn không có quyền xóa cột này! Chỉ owner và member mới có quyền này." 
+      });
+    }
+
+    // Kiểm tra thêm: Chỉ owner mới được xóa (theo logic ban đầu của bạn)
+    // if (role !== "owner") {
+    //   return res.status(403).json({ message: "Chỉ chủ board mới có quyền xóa cột!" });
+    // }
+
+    // Ẩn tất cả cards trong list
+    await Card.updateMany(
+      { list: list._id, isDeleted: false }, 
+      { $set: { isDeleted: true } }
+    );
+
+    // Cập nhật listOrderIds
     board.listOrderIds = (await Promise.all(
       board.listOrderIds.map(async (id) => {
         const existingList = await List.findOne({ _id: id, isDeleted: false });
         return existingList ? id : null;
       })
     )).filter((id) => id);
+    
     list.isDeleted = true;
 
     const activity = new Activity({
@@ -58,7 +82,9 @@ const deleteList = async (req, res) => {
             isRead: false,
             isHidden: false,
           });
-          return notification.save().then(() => io.to(member.user.toString()).emit("new-notification", notification));
+          return notification.save().then(() => 
+            io.to(member.user.toString()).emit("new-notification", notification)
+          );
         });
       await Promise.all([list.save(), board.save(), ...notificationPromises]);
 

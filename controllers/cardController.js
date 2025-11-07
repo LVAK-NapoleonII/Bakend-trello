@@ -171,8 +171,9 @@ const getCardById = async (req, res) => {
 const updateCard = async (req, res) => {
   try {
     const cardId = req.params.id;
-    const { title, description } = req.body;
+    const { title, description, dueDate, cover } = req.body;
     const userId = req.user?._id;
+
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(cardId)) return res.status(400).json({ message: "Card ID không hợp lệ!" });
 
@@ -185,15 +186,68 @@ const updateCard = async (req, res) => {
     const isMember = board.members.some((m) => m.user?.toString() === userId.toString() && m.isActive);
     if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật thẻ!" });
 
-    if (title) card.title = title;
-    if (description !== undefined) card.description = description;
+    const changes = [];
+    const oldTitle = card.title;
+
+    if (title !== undefined && title.trim() !== card.title) {
+      card.title = title.trim();
+      changes.push("tiêu đề");
+    }
+
+    if (description !== undefined) {
+      const newDesc = description?.trim() || null;
+      if (newDesc !== card.description) {
+        card.description = newDesc;
+        changes.push("mô tả");
+      }
+    }
+
+    if (dueDate !== undefined) {
+      const newDueDate = dueDate ? new Date(dueDate) : null;
+      if ((newDueDate?.toISOString() || null) !== (card.dueDate?.toISOString() || null)) {
+        card.dueDate = newDueDate;
+        changes.push("hạn chót");
+      }
+    }
+
+    if (cover !== undefined) {
+      const newCover = cover?.trim() || null;
+
+      if (newCover) {
+        const isHex = /^#[0-9A-Fa-f]{6}$/.test(newCover);
+        
+        const isImageUrl = 
+          /^https?:\/\/.+/i.test(newCover) || 
+          /^data:image\/.+;base64,/.test(newCover);
+
+        if (!isHex && !isImageUrl) {
+          return res.status(400).json({
+            message: "Cover phải là mã HEX (#FF0000) hoặc URL ảnh hợp lệ"
+          });
+        }
+      }
+
+      if (newCover !== card.cover) {
+        card.cover = newCover;
+        changes.push("bìa");
+      }
+    }
+
+    if (changes.length === 0) {
+      const populatedCard = await Card.findById(cardId)
+        .populate("members", "email fullName avatar")
+        .populate("comments.user", "email fullName avatar")
+        .populate("notes.createdBy", "email fullName avatar")
+        .populate({ path: "activities", match: { isDeleted: false } });
+      return res.status(200).json(populatedCard);
+    }
 
     const activity = new Activity({
       user: userId,
       action: { category: "card", type: "updated" },
       target: card._id,
       targetModel: "Card",
-      details: `User ${req.user.fullName} updated card "${card.title}"`,
+      details: `User ${req.user.fullName} đã cập nhật ${changes.join(", ")} của thẻ "${oldTitle}"`,
     });
     await activity.save();
     card.activities.push(activity._id);
@@ -209,7 +263,7 @@ const updateCard = async (req, res) => {
     if (io) {
       io.to(card.board.toString()).emit("card-updated", {
         card: populatedCard,
-        message: `${req.user.fullName} đã cập nhật card "${card.title}"`,
+        message: `${req.user.fullName} đã cập nhật ${changes.join(", ")} của thẻ "${oldTitle}"`,
       });
     }
 
@@ -219,7 +273,6 @@ const updateCard = async (req, res) => {
     return res.status(500).json({ message: "Lỗi khi cập nhật thẻ" });
   }
 };
-
 const deleteCard = async (req, res) => {
   try {
     const cardId = req.params.id;
