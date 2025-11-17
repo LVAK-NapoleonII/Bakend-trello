@@ -2,9 +2,10 @@ const mongoose = require("mongoose");
 const Card = require("../models/Card");
 const Board = require("../models/Board");
 const Activity = require("../models/Activity");
-const Comment = require("../models/Comment"); // Import Comment model
+const Comment = require("../models/Comment"); 
 const Notification = require("../models/Notification");
 const User = require("../models/User");
+
 
 const addComment = async (req, res) => {
   try {

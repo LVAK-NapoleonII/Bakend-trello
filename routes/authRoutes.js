@@ -10,6 +10,7 @@ const {
   refreshToken,
   logout,
   searchUsers,
+  updateProfile
 } = require("../controllers/authController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const notificationMiddleware = require("../middlewares/notificationMiddleware");
@@ -578,6 +579,39 @@ module.exports = () => {
    *               $ref: '#/components/schemas/ApiResponse'
    */
   router.get("/search", authMiddleware, searchUsers);
+
+  /**
+ * @swagger
+ * /api/auth/profile:
+ *   put:
+ *     summary: Cập nhật hồ sơ người dùng
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Cập nhật thành công
+ *       400:
+ *         description: Dữ liệu không hợp lệ
+ *       401:
+ *         description: Không xác thực
+ *       404:
+ *         description: Người dùng không tồn tại
+ *       500:
+ *         description: Lỗi server
+ */
+router.put("/profile", authMiddleware, updateProfile);
 
   return router;
 };

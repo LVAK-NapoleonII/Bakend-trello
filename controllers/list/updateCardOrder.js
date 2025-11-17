@@ -3,6 +3,7 @@ const List = require("../../models/List");
 const Card = require("../../models/Card");
 const Activity = require("../../models/Activity");
 const checkBoardAccess = require("../../helpers/checkBoardAccess");
+const Notification = require("../../models/Notification");
 
 const updateCardOrder = async (req, res) => {
   try {

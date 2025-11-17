@@ -94,6 +94,11 @@ module.exports = (io) => {
     "/",
     authMiddleware,
     activityMiddleware("workspace_created", "Workspace", (req) => `User ${req.user.fullName} created workspace "${req.body.name}"`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã tạo workspace "${req.body.name}"`,
+      "activity",
+      "Workspace"
+    ),
     (req, res) => createWorkspace(req, res, io)
   );
 

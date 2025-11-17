@@ -3,6 +3,7 @@ const Card = require("../../models/Card");
 const List = require("../../models/List");
 const Board = require("../../models/Board");
 const Activity = require("../../models/Activity");
+const Notification = require("../../models/Notification");
 
 const moveCard = async (req, res) => {
   try {

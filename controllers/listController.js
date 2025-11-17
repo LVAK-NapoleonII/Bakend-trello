@@ -5,6 +5,7 @@ const Activity = require("../models/Activity");
 const Notification = require("../models/Notification");
 const checkBoardAccess = require("../helpers/checkBoardAccess");
 
+
 const createList = async (req, res) => {
   try {
     const { title, board, position } = req.body;

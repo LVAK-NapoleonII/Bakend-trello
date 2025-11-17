@@ -281,12 +281,12 @@ module.exports = (io) => {
   router.delete(
     "/:id",
     authMiddleware,
-    activityMiddleware("card_hidden", "member", "Card", (req) => `User ${req.user.fullName} hid card`),
-    notificationMiddleware(
-      (req) => `${req.user.fullName} đã ẩn card`,
-      "activity",
-      "Card"
-    ),
+    activityMiddleware("card_hidden", "member", "Card", (req) => `User ${req.user.fullName} hide card`),
+      notificationMiddleware(
+    (req) => `Thẻ đã bị xóa bởi ${req.user.fullName}`,
+    "activity",
+    "Card"
+  ),
     (req, res) => deleteCard(req, res, io)
   );
 
@@ -341,17 +341,12 @@ module.exports = (io) => {
   router.put(
     "/:id/complete",
     authMiddleware,
-    activityMiddleware(
-      "card_completion_toggled",
-      "member",
-      "Card",
-      (req) => `User ${req.user.fullName} toggled completion of card`
-    ),
-    notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật trạng thái hoàn thành của card`,
-      "activity",
-      "Card"
-    ),
+    activityMiddleware("card_completed", "Card", (req) => `User ${req.user.fullName} marked card as completed`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã đánh dấu thẻ hoàn thành`,
+    "activity",
+    "Card"
+  ),
     (req, res) => toggleCardCompletion(req, res, io)
   );
 

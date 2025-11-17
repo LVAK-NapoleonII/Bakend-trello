@@ -6,6 +6,7 @@ const Activity = require("../../models/Activity");
 const Notification = require("../../models/Notification");
 const checkBoardAccess = require("../../helpers/checkBoardAccess");
 
+
 const deleteList = async (req, res) => {
   try {
     const { id: listId } = req.params;

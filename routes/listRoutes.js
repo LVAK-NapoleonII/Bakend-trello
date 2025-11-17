@@ -67,7 +67,12 @@ module.exports = (io) => {
   router.post(
     "/",
     authMiddleware,
-    activityMiddleware("list_created", "List", (req) => `User ${req.user.fullName} created list "${req.body.title}"`),
+      activityMiddleware("list_created", "List", (req) => `User ${req.user.fullName} created list "${req.body.title}"`),
+      notificationMiddleware(
+        (req) => `${req.user.fullName} đã tạo list "${req.body.title}" trong board`,
+        "activity",
+        "List"
+      ),
     (req, res) => createList(req, res, io)
   );
 
@@ -149,7 +154,12 @@ module.exports = (io) => {
   router.put(
     "/card-order/:listId",
     authMiddleware,
-    activityMiddleware("card_order_updated", "List", (req) => `User ${req.user.fullName} updated card order in list`),
+    activityMiddleware("list_cards_reordered", "List", (req) => `User ${req.user.fullName} reordered cards in list`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã sắp xếp lại thẻ trong list`,
+      "activity",
+      "List"
+    ),
     (req, res) => updateCardOrder(req, res, io)
   );
 
@@ -200,6 +210,12 @@ module.exports = (io) => {
   router.put(
     "/board/:boardId/list-order",
     authMiddleware,
+    activityMiddleware("board_lists_reordered", "Board", (req) => `User ${req.user.fullName} reordered lists in board`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã sắp xếp lại list trong board`,
+      "activity",
+      "Board"  
+    ),
     (req, res) => updateListOrder(req, res, io)
   );
 

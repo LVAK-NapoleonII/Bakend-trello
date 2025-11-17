@@ -213,6 +213,28 @@ const updateAvatar = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const { fullName, email } = req.body;
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
+
+    if (fullName) user.fullName = fullName.trim();
+    if (email && email !== user.email) {
+      const existing = await User.findOne({ email });
+      if (existing) return res.status(400).json({ message: "Email đã tồn tại" });
+      user.email = email;
+    }
+    await user.save();
+
+    res.status(200).json({ message: "Cập nhật hồ sơ thành công", user: { _id: user._id, fullName: user.fullName, email: user.email, avatar: user.avatar } });
+  } catch (error) {
+    console.error("Update profile error:", error.message);
+    res.status(500).json({ message: "Lỗi server" });
+  }
+};
+
 const logout = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -339,4 +361,5 @@ module.exports = {
   updateAvatar,
   logout,
   searchUsers,
+  updateProfile
 };

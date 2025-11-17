@@ -183,6 +183,11 @@ module.exports = () => {
     "/",
     authMiddleware,
     activityMiddleware("board_created", "Board", (req) => `User ${req.user.fullName} created board "${req.body.title}"`),
+    notificationMiddleware(
+      (req) => `${req.user.fullName} đã tạo board "${req.body.title}"`,
+      "activity",
+      "Board"
+    ),
     createBoard
   );
 
@@ -306,7 +311,7 @@ module.exports = () => {
   router.put(
     "/:id",
     authMiddleware,
-    activityMiddleware("board_updated", "board", "Board", (req) => `User ${req.user.fullName} updated board "${req.body.title || 'unknown'}"`),
+    activityMiddleware("board_updated", "Board", (req) => `User ${req.user.fullName} updated board "${req.body.title || 'unknown'}"`),
     notificationMiddleware(
       (req) => `${req.user.fullName} đã cập nhật board "${req.body.title || 'unknown'}"`,
       "activity",
@@ -354,8 +359,12 @@ module.exports = () => {
   router.delete(
     "/:id",
     authMiddleware,
-    activityMiddleware("board_deleted", "Board", (req) => `User ${req.user.fullName} deleted board`),
-    deleteBoard
+  activityMiddleware("board_deleted", "Board", (req) => `User ${req.user.fullName} deleted board`),
+  notificationMiddleware(
+    (req) => `${req.user.fullName} đã xóa board`,
+    "activity",
+    "Board"
+  ),
   );
 
   /**
@@ -414,7 +423,12 @@ module.exports = () => {
   router.put(
     "/:boardId/column-order",
     authMiddleware,
-    activityMiddleware("column_order_updated", "Board", (req) => `User ${req.user.fullName} updated column order`),
+    activityMiddleware("board_columns_reordered", "Board", (req) => `User ${req.user.fullName} reordered columns`),
+      notificationMiddleware(
+        (req) => `${req.user.fullName} đã sắp xếp lại cột trong board`,
+        "activity",
+        "Board"
+      ),
     updateColumnOrder
   );
 

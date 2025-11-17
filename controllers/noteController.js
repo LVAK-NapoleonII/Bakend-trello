@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Card = require("../models/Card");
 const Board = require("../models/Board");
 const Activity = require("../models/Activity");
-const Note = require("../models/Note"); // Import Note model
+const Note = require("../models/Note"); 
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 

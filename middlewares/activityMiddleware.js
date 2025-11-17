@@ -1,4 +1,5 @@
 const Activity = require("../models/Activity");
+const User = require("../models/User")
 
 const activityMiddleware = (actionType, category, targetModel, detailsFn) => {
   return async (req, res, next) => {
@@ -33,6 +34,7 @@ const activityMiddleware = (actionType, category, targetModel, detailsFn) => {
 
       req.activityData = {
         action: { type: actionType, category },
+        target: req.body.card || req.params.id || req.body.board || req.body.list, // ← ĐẢM BẢO
         targetModel,
         details,
         user: userId,

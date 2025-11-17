@@ -5,6 +5,8 @@ const Board = require("../models/Board");
 const Activity = require("../models/Activity");
 const User = require("../models/User");
 const Workspace = require("../models/Workspace");
+const Notification = require("../models/Notification");
+
 const createCard = async (req, res) => {
   try {
     const { title, description, list, board } = req.body;
@@ -63,6 +65,15 @@ const createCard = async (req, res) => {
     boardExists.activities = boardExists.activities || [];
     boardExists.activities.push(activity._id);
     await Promise.all([card.save(), listExists.save(), boardExists.save()]);
+
+    const notifications = boardExists.members.map((m) => ({
+      user: m.user,
+      message: `Thẻ "${title}" đã được tạo bởi ${req.user.fullName} trong danh sách "${listExists.title}"`,
+      type: "activity",
+      target: card._id,
+      targetModel: "Card",
+    }));
+    await Notification.insertMany(notifications);
 
     const populatedCard = await Card.findById(card._id)
       .populate("members", "email fullName avatar")
@@ -212,21 +223,14 @@ const updateCard = async (req, res) => {
 
     if (cover !== undefined) {
       const newCover = cover?.trim() || null;
+      const isHex = /^#[0-9A-Fa-f]{6}$/.test(newCover);
+      const isImageUrl = /^https?:\/\/.+/i.test(newCover) || /^data:image\/.+;base64,/.test(newCover);
 
-      if (newCover) {
-        const isHex = /^#[0-9A-Fa-f]{6}$/.test(newCover);
-        
-        const isImageUrl = 
-          /^https?:\/\/.+/i.test(newCover) || 
-          /^data:image\/.+;base64,/.test(newCover);
-
-        if (!isHex && !isImageUrl) {
-          return res.status(400).json({
-            message: "Cover phải là mã HEX (#FF0000) hoặc URL ảnh hợp lệ"
-          });
-        }
+      if (newCover && !isHex && !isImageUrl) {
+        return res.status(400).json({
+          message: "Cover phải là mã HEX (#FF0000) hoặc URL ảnh hợp lệ",
+        });
       }
-
       if (newCover !== card.cover) {
         card.cover = newCover;
         changes.push("bìa");
@@ -253,6 +257,15 @@ const updateCard = async (req, res) => {
     card.activities.push(activity._id);
     await card.save();
 
+    const notifications = board.members.map((m) => ({
+      user: m.user,
+      message: `${req.user.fullName} đã cập nhật ${changes.join(", ")} của thẻ "${oldTitle}"`,
+      type: "activity",
+      target: card._id,
+      targetModel: "Card",
+    }));
+    await Notification.insertMany(notifications);
+
     const populatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
       .populate("comments.user", "email fullName avatar")
@@ -273,6 +286,7 @@ const updateCard = async (req, res) => {
     return res.status(500).json({ message: "Lỗi khi cập nhật thẻ" });
   }
 };
+
 const deleteCard = async (req, res) => {
   try {
     const cardId = req.params.id;
@@ -307,6 +321,15 @@ const deleteCard = async (req, res) => {
     await activity.save();
     card.activities.push(activity._id);
     await card.save();
+
+    const notifications = board.members.map((m) => ({
+      user: m.user,
+      message: `${req.user.fullName} đã ẩn card "${card.title}"`,
+      type: "activity",
+      target: card._id,
+      targetModel: "Card",
+    }));
+    await Notification.insertMany(notifications);
 
     const io = req.app.get("io");
     if (io) {
@@ -352,6 +375,15 @@ const toggleCardCompletion = async (req, res) => {
     await activity.save();
     card.activities.push(activity._id);
     await card.save();
+
+    const notifications = board.members.map((m) => ({
+      user: m.user,
+      message: `${req.user.fullName} đã ${card.completed ? "hoàn thành" : "bỏ hoàn thành"} card "${card.title}"`,
+      type: "activity",
+      target: card._id,
+      targetModel: "Card",
+    }));
+    await Notification.insertMany(notifications);
 
     const io = req.app.get("io");
     if (io) {

@@ -9,7 +9,6 @@ const getNotifications = async (req, res) => {
       return res.status(401).json({ message: "Không tìm thấy hoặc ID người dùng không hợp lệ!" });
     }
 
-
     const notifications = await Notification.find({
       user: userId,
       isHidden: false,
@@ -17,11 +16,10 @@ const getNotifications = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate({
         path: "target",
-        select: "title name _id board workspace list", // Thêm trường list nếu cần
+        select: "title name _id board workspace list",
         match: { isDeleted: { $ne: true } },
       })
       .lean();
-
 
     const cardNotifications = notifications.filter(n => 
       n.target && n.targetModel === "Card"
@@ -31,6 +29,13 @@ const getNotifications = async (req, res) => {
       n.target && n.targetModel === "Board"
     );
 
+    const workspaceNotifications = notifications.filter(n => 
+      n.target && n.targetModel === "Workspace"
+    );
+
+    const listNotifications = notifications.filter(n => 
+      n.target && n.targetModel === "List"
+    );
 
     const cardIds = cardNotifications.map(n => n.target._id);
     const cards = await mongoose.model("Card")
@@ -49,7 +54,6 @@ const getNotifications = async (req, res) => {
 
     const cardMap = new Map(cards.map(card => [card._id.toString(), card]));
 
- 
     const boardIds = boardNotifications.map(n => n.target._id);
     const boards = await mongoose.model("Board")
       .find({ _id: { $in: boardIds } })
@@ -62,11 +66,26 @@ const getNotifications = async (req, res) => {
 
     const boardMap = new Map(boards.map(board => [board._id.toString(), board]));
 
- 
+    const listIds = listNotifications.map(n => n.target._id);
+    const lists = await mongoose.model("List")
+      .find({ _id: { $in: listIds } })
+      .populate({
+        path: "board",
+        select: "_id title workspace",
+        match: { isDeleted: { $ne: true } },
+        populate: {
+          path: "workspace",
+          select: "_id name",
+          match: { isDeleted: { $ne: true } },
+        }
+      })
+      .lean();
+
+    const listMap = new Map(lists.map(list => [list._id.toString(), list]));
+
     const enrichedNotifications = notifications.map(notification => {
       if (!notification.target) return null;
       
-      // Xử lý Card: Thêm boardId và thông tin workspace
       if (notification.targetModel === "Card") {
         const card = cardMap.get(notification.target._id.toString());
         if (card && card.board && card.board.workspace) {
@@ -74,16 +93,16 @@ const getNotifications = async (req, res) => {
             ...notification,
             target: {
               ...notification.target,
-              boardId: card.board._id, // Thêm boardId vào target
-              board: card.board,       // Giữ nguyên thông tin board
+              boardId: card.board._id,
+              board: card.board,
               workspace: card.board.workspace
-            }
+            },
+            redirectUrl: `/workspaces/${card.board.workspace._id}/boards/${card.board._id}/cards/${notification.target._id}`
           };
         }
         return null;
       }
       
-      // Xử lý Board: Thêm workspaceId
       if (notification.targetModel === "Board") {
         const board = boardMap.get(notification.target._id.toString());
         if (board && board.workspace) {
@@ -91,9 +110,34 @@ const getNotifications = async (req, res) => {
             ...notification,
             target: {
               ...notification.target,
-              workspaceId: board.workspace._id, // Thêm workspaceId
+              workspaceId: board.workspace._id,
               workspace: board.workspace
-            }
+            },
+            redirectUrl: `/workspaces/${board.workspace._id}/boards/${notification.target._id}`
+          };
+        }
+        return null;
+      }
+
+      if (notification.targetModel === "Workspace") {
+        return {
+          ...notification,
+          redirectUrl: `/workspaces/${notification.target._id}`
+        };
+      }
+
+      if (notification.targetModel === "List") {
+        const list = listMap.get(notification.target._id.toString());
+        if (list && list.board && list.board.workspace) {
+          return {
+            ...notification,
+            target: {
+              ...notification.target,
+              boardId: list.board._id,
+              board: list.board,
+              workspace: list.board.workspace
+            },
+            redirectUrl: `/workspaces/${list.board.workspace._id}/boards/${list.board._id}`
           };
         }
         return null;
@@ -102,7 +146,6 @@ const getNotifications = async (req, res) => {
       return notification;
     });
 
-    
     const validNotifications = enrichedNotifications.filter(n => n !== null);
     const unreadCount = validNotifications.filter(n => !n.isRead).length;
 
@@ -112,6 +155,7 @@ const getNotifications = async (req, res) => {
     res.status(500).json({ message: "Lỗi khi lấy thông báo" });
   }
 };
+
 module.exports = {
   getNotifications,
   markNotificationAsRead: require("./notification/markNotificationAsRead"),

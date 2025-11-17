@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const List = require("../../models/List");
 const Activity = require("../../models/Activity");
 const checkBoardAccess = require("../../helpers/checkBoardAccess");
+const Notification = require("../../models/Notification");
 
 const updateListOrder = async (req, res) => {
   try {

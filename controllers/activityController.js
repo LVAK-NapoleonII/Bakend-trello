@@ -6,63 +6,90 @@ exports.getActivities = async (req, res) => {
   try {
     const userId = req.user._id;
     const { page = 1, limit = 10 } = req.query;
+
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: 'ID người dùng không hợp lệ' });
     }
-    console.log('getActivities: Fetching for user:', userId, 'Page:', page, 'Limit:', limit);
 
-    const activities = await Activity.find({ 
+    // Tách riêng populate cho từng targetModel
+    const baseQuery = {
       user: userId,
-      isHidden: false 
-    })
+      isHidden: false
+    };
+
+    const activities = await Activity.find(baseQuery)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
-      .populate([
-        {
-          path: 'target',
-          select: 'name title board',
-          match: { isDeleted: { $ne: true } },
-        },
-        {
-          path: 'target',
-          match: { isDeleted: { $ne: true }, targetModel: 'Card' }, // Chỉ populate board cho Card
-          populate: {
-            path: 'board',
-            model: 'Board',
-            select: 'workspace',
-            match: { isDeleted: { $ne: true } },
-            populate: {
-              path: 'workspace',
-              model: 'Workspace',
-              select: '_id',
-              match: { isDeleted: { $ne: true } },
-            },
-          },
-        },
-      ])
       .lean();
 
-    const validActivities = activities.filter((activity) => {
-      if (activity.targetModel === 'Card') {
-        if (!activity.target || !activity.target.board || !activity.target.board.workspace) {
-          console.warn('getActivities: Invalid activity, missing target data:', activity);
-          return false;
+    // Populate thủ công theo targetModel
+    const populatedActivities = await Promise.all(
+      activities.map(async (activity) => {
+        if (!activity.target) return { ...activity, target: null };
+
+        let populatedTarget = null;
+
+        try {
+          switch (activity.targetModel) {
+            case 'Board':
+              populatedTarget = await mongoose.model('Board').findById(activity.target)
+                .select('title _id')
+                .lean();
+              break;
+
+            case 'Workspace':
+              populatedTarget = await mongoose.model('Workspace').findById(activity.target)
+                .select('name _id')
+                .lean();
+              break;
+
+            case 'Card':
+              populatedTarget = await mongoose.model('Card').findById(activity.target)
+                .select('title board')
+                .populate({
+                  path: 'board',
+                  select: 'workspace title',
+                  match: { isDeleted: { $ne: true } },
+                  populate: {
+                    path: 'workspace',
+                    select: '_id name',
+                    match: { isDeleted: { $ne: true } }
+                  }
+                })
+                .lean();
+              break;
+
+            default:
+              populatedTarget = { _id: activity.target };
+          }
+        } catch (err) {
+          console.warn(`Populate failed for ${activity.targetModel}:`, err.message);
+          populatedTarget = null;
         }
+
+        return {
+          ...activity,
+          target: populatedTarget || { _id: activity.target }
+        };
+      })
+    );
+
+    // Lọc hoạt động hợp lệ
+    const validActivities = populatedActivities.filter(a => {
+      if (a.targetModel === 'Card') {
+        return a.target?.board?.workspace;
       }
-      return true;
+      return !!a.target;
     });
 
-    console.log('getActivities: Found', validActivities.length, 'valid activities');
     res.status(200).json({ activities: validActivities });
   } catch (error) {
-    console.error('getActivities: Detailed error:', {
-      message: error.message,
-      stack: error.stack,
-      userId: req.user._id,
-      query: req.query,
+    console.error('getActivities error:', error);
+    res.status(500).json({ 
+      message: 'Lỗi server khi lấy hoạt động',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
-    res.status(500).json({ message: 'Lỗi khi lấy hoạt động', error: error.message });
   }
 };
 
@@ -70,6 +97,10 @@ exports.hideActivity = async (req, res) => {
   try {
     const { activityId } = req.params;
     const userId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(activityId)) {
+      return res.status(400).json({ message: "Activity ID không hợp lệ" });
+    }
 
     const activity = await Activity.findOneAndUpdate(
       { _id: activityId, user: userId },
@@ -81,9 +112,17 @@ exports.hideActivity = async (req, res) => {
       return res.status(404).json({ message: "Hoạt động không tồn tại hoặc không thuộc về bạn" });
     }
 
-    res.status(200).json({ message: "Hoạt động đã được ẩn" });
+    const io = req.app.get("io");
+    if (io) {
+      io.to(userId.toString()).emit("activity-hidden", {
+        activityId: activity._id,
+        message: "Hoạt động đã được ẩn"
+      });
+    }
+
+    res.status(200).json({ message: "Hoạt động đã được ẩn", activityId: activity._id });
   } catch (error) {
-    console.error("Lỗi khi ẩn hoạt động:", error);
+    console.error("hideActivity error:", error);
     res.status(500).json({ message: "Lỗi khi ẩn hoạt động", error: error.message });
   }
 };
@@ -92,14 +131,25 @@ exports.hideAllActivities = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    await Activity.updateMany(
+    const result = await Activity.updateMany(
       { user: userId, isHidden: false },
       { $set: { isHidden: true } }
     );
 
-    res.status(200).json({ message: "Tất cả hoạt động đã được ẩn" });
+    const io = req.app.get("io");
+    if (io) {
+      io.to(userId.toString()).emit("all-activities-hidden", {
+        message: "Tất cả hoạt động đã được ẩn",
+        count: result.modifiedCount
+      });
+    }
+
+    res.status(200).json({ 
+      message: "Tất cả hoạt động đã được ẩn", 
+      count: result.modifiedCount 
+    });
   } catch (error) {
-    console.error("Lỗi khi ẩn tất cả hoạt động:", error);
+    console.error("hideAllActivities error:", error);
     res.status(500).json({ message: "Lỗi khi ẩn tất cả hoạt động", error: error.message });
   }
 };
