@@ -43,6 +43,7 @@ const createCard = async (req, res) => {
       board,
       members: [userId],
       position: newPosition,
+      version: 0,
       isDeleted: false,
       activities: [],
       checklists: [],
@@ -124,7 +125,7 @@ const getCardsByList = async (req, res) => {
     const cards = await Card.find({ list: listId, isDeleted: false })
       .populate("members", "email fullName avatar isOnline")
       .populate("labels")
-      .sort({ position: 1 });  // Sửa từ { order: 1 } thành { position: 1 }
+      .sort({ position: 1 });  
 
     res.status(200).json(cards);
   } catch (error) {
@@ -182,14 +183,22 @@ const getCardById = async (req, res) => {
 const updateCard = async (req, res) => {
   try {
     const cardId = req.params.id;
-    const { title, description, dueDate, cover } = req.body;
+    const { title, description, dueDate, cover, version} = req.body;
     const userId = req.user?._id;
 
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(cardId)) return res.status(400).json({ message: "Card ID không hợp lệ!" });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version is required for update" });
+    }
 
-    const card = await Card.findOne({ _id: cardId, isDeleted: false });
-    if (!card) return res.status(404).json({ message: "Không tìm thấy thẻ!" });
+    const card = await Card.findOne({ _id: cardId, isDeleted: false, version });
+    if (!card) {
+      return res.status(409).json({ 
+        message: "Xung đột dữ liệu!! thẻ đang được di chuyển bởi thành viên khác",
+        code: "VERSION_CONFLICT"
+      });
+    }
 
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
     if (!board) return res.status(404).json({ message: "Board không tồn tại!" });
@@ -245,7 +254,7 @@ const updateCard = async (req, res) => {
         .populate({ path: "activities", match: { isDeleted: false } });
       return res.status(200).json(populatedCard);
     }
-
+    card.version += 1;
     const activity = new Activity({
       user: userId,
       action: { category: "card", type: "updated" },

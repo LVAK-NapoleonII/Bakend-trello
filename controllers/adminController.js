@@ -467,9 +467,9 @@ const restoreUser = async (req, res) => {
 
 const getAllWorkspaces = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 20, search,showDeleted } = req.query;
     
-    const query = { isDeleted: false };
+    const query = {};
     
     if (search) {
       query.name = { $regex: search, $options: "i" };
@@ -646,10 +646,9 @@ const restoreWorkspace = async (req, res) => {
 
 const getAllBoards = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 20, search, showDeleted } = req.query;
     
-    const query = { isDeleted: false };
-    
+    const query = {};
     if (search) {
       query.title = { $regex: search, $options: "i" };
     }

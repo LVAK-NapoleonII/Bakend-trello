@@ -34,7 +34,7 @@ const activityMiddleware = (actionType, category, targetModel, detailsFn) => {
 
       req.activityData = {
         action: { type: actionType, category },
-        target: req.body.card || req.params.id || req.body.board || req.body.list, // ← ĐẢM BẢO
+        target: req.body.card || req.params.id || req.body.board || req.body.list, 
         targetModel,
         details,
         user: userId,

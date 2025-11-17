@@ -3,14 +3,13 @@ const List = require("../../models/List");
 const Card = require("../../models/Card");
 const Activity = require("../../models/Activity");
 const checkBoardAccess = require("../../helpers/checkBoardAccess");
-const Notification = require("../../models/Notification");
 
 const updateCardOrder = async (req, res) => {
   try {
     const { listId } = req.params;
-    const { cardOrder } = req.body;
+    const { cardOrder, version } = req.body;
     const userId = req.user?._id;
-    
+
     if (!userId) {
       return res.status(401).json({ message: "Không tìm thấy thông tin người dùng!" });
     }
@@ -20,26 +19,32 @@ const updateCardOrder = async (req, res) => {
     if (!Array.isArray(cardOrder)) {
       return res.status(400).json({ message: "Danh sách thứ tự thẻ không hợp lệ!" });
     }
+    if (version === undefined || version === null) {
+      return res.status(400).json({ message: "Version là bắt buộc!" });
+    }
 
-    const list = await List.findOne({ _id: listId, isDeleted: false });
+    // Tìm List với version chính xác → chống conflict
+    const list = await List.findOne({ _id: listId, version, isDeleted: false });
     if (!list) {
-      return res.status(404).json({ message: "List không tồn tại hoặc đã bị ẩn!" });
+      return res.status(409).json({
+        message: "Cột đã được thay đổi bởi người khác. Vui lòng tải lại!",
+        code: "VERSION_CONFLICT"
+      });
     }
 
     // Kiểm tra quyền truy cập board
     const { canView, canEdit, board } = await checkBoardAccess(list.board, userId);
-    
+
     if (!canView) {
       return res.status(403).json({ message: "Bạn không có quyền truy cập board này!" });
     }
-
-    // Chỉ owner và board member mới được sắp xếp cards
     if (!canEdit) {
-      return res.status(403).json({ 
-        message: "Bạn không có quyền sắp xếp thẻ trong list này! Chỉ owner và member mới có quyền này." 
+      return res.status(403).json({
+        message: "Bạn không có quyền sắp xếp thẻ! Chỉ owner và member mới được phép."
       });
     }
 
+    // Validate tất cả card IDs
     if (cardOrder.length > 0) {
       for (const cardId of cardOrder) {
         if (!mongoose.Types.ObjectId.isValid(cardId)) {
@@ -50,57 +55,55 @@ const updateCardOrder = async (req, res) => {
           return res.status(404).json({ message: `Card ${cardId} không tồn tại hoặc đã bị ẩn!` });
         }
         if (card.list.toString() !== listId) {
-          return res.status(400).json({ message: `Card ${cardId} không thuộc list này!` });
+          return res.status(400).json({ message: `Card ${cardId} không thuộc cột này!` });
         }
       }
     }
 
-    // Cập nhật cardOrderIds trong List
-    list.cardOrderIds = cardOrder.map((id) => new mongoose.Types.ObjectId(id));
+    // Cập nhật thứ tự + tăng version
+    list.cardOrderIds = cardOrder.map(id => new mongoose.Types.ObjectId(id));
+    list.version += 1;
 
-    // Cập nhật position cho tất cả thẻ dựa trên cardOrder
+    // Cập nhật position cho từng card
     await Promise.all(
-      cardOrder.map(async (cardId, index) => {
-        await Card.findByIdAndUpdate(
-          cardId,
-          { position: index },
-          { new: true }
-        );
-      })
+      cardOrder.map((cardId, index) =>
+        Card.findByIdAndUpdate(cardId, { position: index }, { new: true })
+      )
     );
 
-    // Lưu activity
+    // Tạo activity
     const activity = new Activity({
       user: userId,
       action: { category: "list", type: "card_order_updated" },
       target: list._id,
       targetModel: "List",
-      details: `User ${req.user.fullName} updated card order in list "${list.title}"`,
+      details: `đã thay đổi thứ tự thẻ trong cột "${list.title}"`,
     });
     await activity.save();
+
     board.activities = board.activities || [];
     board.activities.push(activity._id);
 
-    // Lưu thay đổi vào DB
+    // Lưu cả list và board
     await Promise.all([list.save(), board.save()]);
 
-    // Debug log
-    console.log("updateCardOrder: Updated cardOrderIds:", list.cardOrderIds.map(id => id.toString()));
-    console.log("updateCardOrder: Updated positions:", await Card.find({ list: listId, isDeleted: false }).select('title position'));
-
-    // Emit sự kiện card-order-updated
+    // Realtime
     const io = req.app.get("io");
     if (io) {
       io.to(list.board.toString()).emit("card-order-updated", {
         listId,
-        cardOrder: cardOrder,
-        message: `Thứ tự thẻ trong list "${list.title}" đã được cập nhật bởi ${req.user.fullName}`,
+        cardOrder,
+        version: list.version,
       });
     }
 
-    return res.status(200).json({ message: "Cập nhật thứ tự thẻ thành công" });
+    return res.status(200).json({
+      message: "Cập nhật thứ tự thẻ thành công!",
+      version: list.version
+    });
+
   } catch (error) {
-    console.error("updateCardOrder error:", error.message);
+    console.error("updateCardOrder error:", error);
     return res.status(500).json({ message: "Lỗi server khi cập nhật thứ tự thẻ" });
   }
 };

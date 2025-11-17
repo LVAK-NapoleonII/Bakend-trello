@@ -45,6 +45,7 @@ const createList = async (req, res) => {
       isDeleted: false,
       cardOrderIds: [],
       activities: [],
+      version: 0,
     });
 
     boardExists.listOrderIds = boardExists.listOrderIds || [];
@@ -144,7 +145,7 @@ const getListsByBoard = async (req, res) => {
 const updateList = async (req, res) => {
   try {
     const { id: listId } = req.params;
-    const { title, position } = req.body;
+    const { title, position, version } = req.body;
     const userId = req.user?._id;
     
     if (!userId) {
@@ -160,9 +161,16 @@ const updateList = async (req, res) => {
       return res.status(400).json({ message: "Position phải là số không âm!" });
     }
 
-    const list = await List.findOne({ _id: listId, isDeleted: false });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version is required" });
+    }
+
+    const list = await List.findOne({ _id: listId, isDeleted: false, version });
     if (!list) {
-      return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
+      return res.status(409).json({ 
+        message: "Conflict detected. List was modified. Please refresh.",
+        code: "VERSION_CONFLICT"
+      });
     }
 
     // Kiểm tra quyền truy cập board
@@ -183,6 +191,8 @@ const updateList = async (req, res) => {
     if (title) updateData.title = title;
     if (position !== undefined) updateData.position = position;
 
+    updateData.version = list.version + 1;
+    
     const updatedList = await List.findByIdAndUpdate(listId, updateData, { new: true }).populate({
       path: "activities",
       match: { isHidden: false },

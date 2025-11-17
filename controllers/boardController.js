@@ -27,6 +27,7 @@ const createBoard = async (req, res) => {
       workspace,
       members: [{ user: userId, isActive: true }],
       isDeleted: false,
+      version: 0,
     });
 
     const activity = new Activity({
@@ -148,50 +149,69 @@ const getBoardById = async (req, res) => {
 
 const updateBoard = async (req, res) => {
   try {
-    const { title, description, background, visibility } = req.body;
+    const { title, description, background, visibility, version } = req.body;
     const boardId = req.params.id;
     const userId = req.user?._id;
+
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version là bắt buộc!" });
+    }
 
-    const board = await Board.findById(boardId);
-    if (!board) return res.status(404).json({ message: "Board không tồn tại" });
+    // Tìm board với version chính xác
+    const board = await Board.findOne({ _id: boardId, version });
+    if (!board) {
+      return res.status(409).json({ 
+        message: "Bảng đã được chỉnh sửa bởi người khác. Vui lòng tải lại!",
+        code: "VERSION_CONFLICT"
+      });
+    }
 
-    const isMember = board.members.some((m) => m.user.toString() === userId.toString() && m.isActive);
+    const isMember = board.members.some(m => m.user.toString() === userId.toString() && m.isActive);
     if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật board này!" });
 
-    const updated = await Board.findByIdAndUpdate(
-      boardId,
-      { title, description, background, visibility },
-      { new: true }
-    )
+    // Cập nhật các field
+    if (title !== undefined) board.title = title;
+    if (description !== undefined) board.description = description;
+    if (background !== undefined) board.background = background;
+    if (visibility !== undefined) board.visibility = visibility;
+
+    // Tăng version
+    board.version += 1;
+
+    // Tạo activity
+    const activity = new Activity({
+      user: userId,
+      action: { category: "board", type: "updated" },
+      target: board._id,
+      targetModel: "Board",
+      details: `đã cập nhật bảng "${board.title}"`,
+    });
+    await activity.save();
+    board.activities.push(activity._id);
+
+    await board.save();
+
+    // Populate lại dữ liệu trả về
+    const updatedBoard = await Board.findById(boardId)
       .populate("members.user", "email avatar fullName isOnline")
       .populate("owner", "email fullName _id isOnline")
       .populate("workspace", "name");
 
-    // Use activityData from middleware
-    const activity = new Activity({
-      user: userId,
-      action: req.activityData.action,
-      target: board._id,
-      targetModel: "Board",
-      details: req.activityData.details || `User ${req.user.fullName} updated board "${title || board.title}"`,
-    });
-    await activity.save();
-    updated.activities.push(activity._id);
-    await updated.save();
-
+    // Emit socket
     const io = req.app.get("io");
     if (io) {
       io.to(boardId).emit("board-updated", {
-        board: updated,
-        message: `Board "${updated.title}" đã được cập nhật bởi ${req.user.fullName}`,
+        board: updatedBoard,
+        message: `Bảng "${updatedBoard.title}" đã được cập nhật`,
       });
     }
 
-    res.status(200).json(updated);
+    return res.status(200).json(updatedBoard);
+
   } catch (error) {
-    console.error("updateBoard error:", error.message);
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("updateBoard error:", error);
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -199,79 +219,111 @@ const deleteBoard = async (req, res) => {
   try {
     const boardId = req.params.id;
     const userId = req.user?._id;
-    if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
+    const { version } = req.body;
 
-    const board = await Board.findById(boardId).populate("workspace");
-    if (!board) return res.status(404).json({ message: "Không tìm thấy bảng!" });
-    if (board.owner.toString() !== userId.toString()) return res.status(403).json({ message: "Chỉ chủ phòng mới có quyền xóa!" });
+    if (!userId) return res.status(401).json({ message: "Không tìm thấy user!" });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version là bắt buộc!" });
+    }
+
+    const board = await Board.findOne({ _id: boardId, version }).populate("workspace");
+    if (!board) {
+      return res.status(409).json({ 
+        message: "Bảng đã bị thay đổi. Vui lòng tải lại!",
+        code: "VERSION_CONFLICT"
+      });
+    }
+
+    if (board.owner.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Chỉ chủ board mới được xóa!" });
+    }
 
     board.isDeleted = true;
+    board.version += 1;
 
     const activity = new Activity({
       user: userId,
       action: { category: "board", type: "deleted" },
       target: board._id,
       targetModel: "Board",
-      details: `User ${req.user.fullName} deleted board "${board.title}"`,
+      details: `đã xóa bảng "${board.title}"`,
     });
     await activity.save();
+
     board.activities.push(activity._id);
     board.workspace.activities.push(activity._id);
+    await Promise.all([board.save(), board.workspace.save()]);
 
+    // Gửi thông báo
     const notifications = board.workspace.members
-      .filter((memberId) => memberId.toString() !== userId.toString())
-      .map((memberId) => ({
+      .filter(m => m.toString() !== userId.toString())
+      .map(memberId => ({
         user: memberId,
-        message: `Bảng "${board.title}" đã bị xóa trong workspace "${board.workspace.name}" bởi ${req.user.fullName}`,
+        message: `Bảng "${board.title}" đã bị xóa bởi ${req.user.fullName}`,
         type: "activity",
         target: board._id,
         targetModel: "Board",
         isRead: false,
-        isHidden: false,
       }));
-    if (notifications.length > 0) {
-      const createdNotifications = await Notification.insertMany(notifications);
-      const io = req.app.get("io");
-      if (io) {
-        createdNotifications.forEach((notification) => {
-          io.to(notification.user.toString()).emit("new-notification", notification);
-        });
-      }
-    }
 
-    await Promise.all([board.save(), board.workspace.save()]);
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+    }
 
     const io = req.app.get("io");
     if (io) {
-      io.to(board.workspace.toString()).emit("board-deleted", {
-        boardId: board._id,
-        message: `Board "${board.title}" đã bị xóa bởi ${req.user.fullName}`,
-      });
+      io.to(board.workspace.toString()).emit("board-deleted", { boardId });
     }
 
-    res.status(200).json({ message: "Đã ẩn bảng thành công" });
+    return res.status(200).json({ message: "Xóa bảng thành công!" });
+
   } catch (error) {
-    console.error("deleteBoard error:", error.message);
-    res.status(500).json({ message: "Lỗi server" });
+    console.error("deleteBoard error:", error);
+    return res.status(500).json({ message: "Lỗi server" });
   }
 };
 
 const updateColumnOrder = async (req, res) => {
   try {
     const { boardId } = req.params;
-    const { columnOrder } = req.body;
+    const { columnOrder, version } = req.body;
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(boardId)) return res.status(400).json({ message: "Board ID không hợp lệ!" });
     if (!Array.isArray(columnOrder) || columnOrder.length === 0) return res.status(400).json({ message: "Danh sách thứ tự cột không hợp lệ!" });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version is required" });
+    }
 
-    const board = await Board.findById(boardId);
-    if (!board) return res.status(404).json({ message: "Board không tồn tại!" });
+    const board = await Board.findOne({ _id: boardId, version });
+    if (!board) {
+      return res.status(409).json({ 
+        message: "Conflict detected. Board was modified. Please refresh.",
+        code: "VERSION_CONFLICT"
+      });
+    }
 
     const isMember = board.members.some((m) => m.user.toString() === userId.toString() && m.isActive);
-    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật board này!" });
+    if (!isMember) return res.status(403).json({ message: "Không có quyền sắp xếp cột" });
 
-    board.listOrderIds = columnOrder;
+    if (columnOrder.length > 0) {
+      for (const listId of columnOrder) {
+        if (!mongoose.Types.ObjectId.isValid(listId)) {
+          return res.status(400).json({ message: `List ID ${listId} không hợp lệ!` });
+        }
+        const list = await List.findOne({ _id: listId, isDeleted: false });
+        if (!list) {
+          return res.status(404).json({ message: `List ${listId} không tồn tại hoặc đã bị ẩn!` });
+        }
+        if (list.board.toString() !== boardId) {
+          return res.status(400).json({ message: `List ${listId} không thuộc board này!` });
+        }
+      }
+    }
+
+    board.listOrderIds = columnOrder.map(id => new mongoose.Types.ObjectId(id));
+    board.version += 1;
+
     await board.save();
 
     const activity = new Activity({
@@ -294,7 +346,9 @@ const updateColumnOrder = async (req, res) => {
       });
     }
 
-    res.status(200).json({ message: "Cập nhật thứ tự cột thành công" });
+    return res.status(200).json({ 
+      message: "Cập nhật thứ tự cột thành công",
+      version: board.version });
   } catch (error) {
     console.error("updateColumnOrder error:", error.message);
     res.status(500).json({ message: "Lỗi server" });

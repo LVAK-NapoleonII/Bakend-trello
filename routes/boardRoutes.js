@@ -738,6 +738,7 @@ module.exports = () => {
   );
   router.get("/workspace/:workspaceId", authMiddleware, getBoardsByWorkspace);
   router.get("/workspace/:workspaceId/members", authMiddleware, getWorkspaceMembers);
+  router.delete("/:id", authMiddleware, deleteBoard);
 
   return router;
 };

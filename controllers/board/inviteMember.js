@@ -28,8 +28,8 @@ const inviteMember = async (req, res) => {
     const workspace = await Workspace.findById(board.workspace);
     if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
 
-    const invitedUsers = []; // ← Danh sách người được mời thành công
-    const errors = [];       // ← Lỗi từng người
+    const invitedUsers = []; 
+    const errors = [];      
 
     // === XỬ LÝ MỜI BẰNG EMAIL ===
     if (email) {

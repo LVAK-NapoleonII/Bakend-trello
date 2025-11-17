@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+
 const boardSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String },
@@ -9,7 +10,7 @@ const boardSchema = new mongoose.Schema({
   members: [
     {
       user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-      isActive: { type: Boolean, default: true }, 
+      isActive: { type: Boolean, default: true },
     },
   ],
   listOrderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "List" }],
@@ -28,6 +29,11 @@ const boardSchema = new mongoose.Schema({
   ],
   activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity" }], 
   isDeleted: { type: Boolean, default: false },
-}, { timestamps: true });
-boardSchema.index({ workspace: 1, owner: 1 });
+  version: { type: Number, default: 0 },
+}, 
+{ timestamps: true });
+
+boardSchema.index({ workspace: 1, isDeleted: 1, visibility: 1 });
+
+
 module.exports = mongoose.model("Board", boardSchema);

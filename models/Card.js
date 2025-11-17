@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const checklistSchema = require("./Checklist");
- 
+
 const labelSchema = new mongoose.Schema({
   name: { type: String, required: true },
   color: { type: String, default: "#b6c2cf" },
@@ -35,12 +35,15 @@ const cardSchema = new mongoose.Schema(
     notes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Note", default: [] }],
     activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity", default: [] }],
     isDeleted: { type: Boolean, default: false },
+    version: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
-// Thêm index
+cardSchema.index({ board: 1, isDeleted: 1, position: 1 });
+cardSchema.index({ list: 1, isDeleted: 1, position: 1 });
 cardSchema.index({ list: 1, board: 1, dueDate: 1, completed: 1 });
 cardSchema.index({ members: 1 });
 cardSchema.index({ "labels.name": 1 });
+
 module.exports = mongoose.model("Card", cardSchema);

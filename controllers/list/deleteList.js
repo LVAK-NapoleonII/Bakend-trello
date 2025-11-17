@@ -10,6 +10,7 @@ const checkBoardAccess = require("../../helpers/checkBoardAccess");
 const deleteList = async (req, res) => {
   try {
     const { id: listId } = req.params;
+    const { version } = req.body;
     const userId = req.user?._id;
     
     if (!userId) {
@@ -19,9 +20,16 @@ const deleteList = async (req, res) => {
       return res.status(400).json({ message: "List ID không hợp lệ!" });
     }
 
-    const list = await List.findOne({ _id: listId, isDeleted: false });
+    if (version === undefined) {
+      return res.status(400).json({ message: "Version is required" });
+    }
+
+    const list = await List.findOne({ _id: listId, isDeleted: false, version });
     if (!list) {
-      return res.status(404).json({ message: "Không tìm thấy cột hoặc cột đã bị ẩn!" });
+      return res.status(409).json({ 
+        message: "Conflict detected. List was modified. Please refresh.",
+        code: "VERSION_CONFLICT"
+      });
     }
 
     // Kiểm tra quyền truy cập board
@@ -49,16 +57,13 @@ const deleteList = async (req, res) => {
       { $set: { isDeleted: true } }
     );
 
-    // Cập nhật listOrderIds
-    board.listOrderIds = (await Promise.all(
-      board.listOrderIds.map(async (id) => {
-        const existingList = await List.findOne({ _id: id, isDeleted: false });
-        return existingList ? id : null;
-      })
-    )).filter((id) => id);
+    await Board.findByIdAndUpdate(
+      board._id,
+      { $pull: { listOrderIds: list._id } }
+    );
     
     list.isDeleted = true;
-
+    list.version += 1;
     const activity = new Activity({
       user: userId,
       action: { category: "list", type: "hidden" },

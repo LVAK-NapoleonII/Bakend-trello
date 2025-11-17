@@ -15,7 +15,7 @@ const notificationSchema = new mongoose.Schema(
     },
     targetModel: {
       type: String,
-      enum: ["Workspace", "Board", "List", "Card", "Activity","User"],
+      enum: ["Workspace", "Board", "List", "Card", "Activity", "User"],
     },
     isRead: { type: Boolean, default: false },
     isHidden: { type: Boolean, default: false },
@@ -23,6 +23,7 @@ const notificationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-notificationSchema.index({ user: 1, isRead: 1 });
+
+notificationSchema.index({ user: 1, isRead: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Notification", notificationSchema);

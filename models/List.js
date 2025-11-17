@@ -9,8 +9,11 @@ const listSchema = new mongoose.Schema(
     dueDate: { type: Date },
     isDeleted: { type: Boolean, default: false },
     activities: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity", default: [] }],
+    version: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
+
+listSchema.index({ board: 1, isDeleted: 1, position: 1 });
 
 module.exports = mongoose.model("List", listSchema);
