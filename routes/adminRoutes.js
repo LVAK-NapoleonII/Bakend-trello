@@ -559,4 +559,6 @@ router.post("/users/inactive/delete", adminController.deleteInactiveUsers);
  */
 router.get("/logs", adminController.getAdminActivityLogs);
 
+router.get('/bans/expiring', adminController.getExpiringBans);
+
 module.exports = router;

@@ -249,8 +249,16 @@ const updateCard = async (req, res) => {
     if (changes.length === 0) {
       const populatedCard = await Card.findById(cardId)
         .populate("members", "email fullName avatar")
-        .populate("comments.user", "email fullName avatar")
-        .populate("notes.createdBy", "email fullName avatar")
+         .populate({
+          path: "comments",
+          match: { isDeleted: false },
+          populate: { path: "user", select: "email fullName avatar" }
+        })
+        .populate({
+          path: "notes",
+          match: { isDeleted: false },
+          populate: { path: "createdBy", select: "email fullName avatar" }
+        })
         .populate({ path: "activities", match: { isDeleted: false } });
       return res.status(200).json(populatedCard);
     }
@@ -277,8 +285,16 @@ const updateCard = async (req, res) => {
 
     const populatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
-      .populate("comments.user", "email fullName avatar")
-      .populate("notes.createdBy", "email fullName avatar")
+       .populate({
+          path: "comments",
+          match: { isDeleted: false },
+          populate: { path: "user", select: "email fullName avatar" }
+        })
+        .populate({
+          path: "notes",
+          match: { isDeleted: false },
+          populate: { path: "createdBy", select: "email fullName avatar" }
+        })
       .populate({ path: "activities", match: { isDeleted: false } });
 
     const io = req.app.get("io");

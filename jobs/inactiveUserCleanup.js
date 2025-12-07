@@ -44,7 +44,7 @@ const sendInactivityNotices = async () => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "⚠️ Thông báo tài khoản không hoạt động",
+        subject: " Thông báo tài khoản không hoạt động",
         html: `
           <!DOCTYPE html>
           <html>
@@ -65,13 +65,13 @@ const sendInactivityNotices = async () => {
                 <h1>APP TEAM</h1>
               </div>
               <div class="content">
-                <h2>⚠️ Tài khoản của bạn đang không hoạt động</h2>
+                <h2> Tài khoản của bạn đang không hoạt động</h2>
                 <p>Xin chào <strong>${user.fullName}</strong>,</p>
                 
                 <p>Chúng tôi nhận thấy tài khoản của bạn (<strong>${user.email}</strong>) đã không hoạt động trong hơn <strong>90 ngày</strong>.</p>
                 
                 <div class="warning">
-                  <strong>⏰ Cảnh báo quan trọng:</strong><br>
+                  <strong> Cảnh báo quan trọng:</strong><br>
                   Nếu bạn không đăng nhập trong vòng <strong>7 ngày</strong> tới, tài khoản của bạn sẽ bị xóa vào ngày <strong>${deletionDate.toLocaleDateString("vi-VN")}</strong>.
                 </div>
 

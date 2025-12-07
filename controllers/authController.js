@@ -67,7 +67,33 @@ const login = async (req, res) => {
     if (!user || !user.isVerified) {
       return res.status(400).json({ message: "Email chưa được xác thực hoặc không tồn tại" });
     }
+if (user.isBanned) {
+      // Nếu có thời hạn và đã hết hạn → tự động unban
+      if (user.banExpiresAt && new Date(user.banExpiresAt) <= new Date()) {
+        user.isBanned = false;
+        user.banReason = null;
+        user.bannedAt = null;
+        user.banExpiresAt = null;
+        await user.save();
 
+        // Ghi log
+        const activity = new Activity({
+          user: user._id,
+          action: { category: "user", type: "auto_unbanned_on_login" },
+          target: user._id,
+          targetModel: "User",
+          details: `User ${user.fullName} auto-unbanned on login attempt`
+        });
+        await activity.save();
+      } else {
+        // Vẫn còn bị ban
+        return res.status(403).json({ 
+          message: user.banExpiresAt 
+            ? `Tài khoản bị khóa đến ${new Date(user.banExpiresAt).toLocaleDateString('vi-VN')}. Lý do: ${user.banReason}`
+            : `Tài khoản bị khóa vĩnh viễn. Lý do: ${user.banReason}`
+        });
+      }
+    }
     const isMatch = await user.matchPassword(password);
     if (!isMatch) return res.status(400).json({ message: "Sai email hoặc mật khẩu" });
 

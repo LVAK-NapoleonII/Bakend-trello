@@ -966,6 +966,38 @@ const getAdminActivityLogs = async (req, res) => {
   }
 };
 
+const getExpiringBans = async (req, res) => {
+  try {
+    const now = new Date();
+    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    // Users đã hết hạn ban nhưng chưa được unban
+    const expiredBans = await User.find({
+      isBanned: true,
+      banExpiresAt: { $lte: now, $ne: null }
+    })
+      .select("fullName email bannedAt banExpiresAt banReason")
+      .sort({ banExpiresAt: 1 })
+      .lean();
+
+    // Users sắp hết hạn ban trong 3 ngày tới
+    const expiringBans = await User.find({
+      isBanned: true,
+      banExpiresAt: { $gt: now, $lte: threeDaysLater }
+    })
+      .select("fullName email bannedAt banExpiresAt banReason")
+      .sort({ banExpiresAt: 1 })
+      .lean();
+
+    res.status(200).json({
+      expiredBans,
+      expiringBans
+    });
+  } catch (error) {
+    console.error("getExpiringBans error:", error.message);
+    res.status(500).json({ message: "Lỗi lấy danh sách ban" });
+  }
+};
 
 module.exports = {
   getDashboardStats,
@@ -987,5 +1019,6 @@ module.exports = {
   getInactiveUsers,
   sendInactivityNotices,
   deleteInactiveUsers,
-  getAdminActivityLogs
+  getAdminActivityLogs,
+  getExpiringBans
 };

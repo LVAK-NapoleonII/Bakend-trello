@@ -17,7 +17,7 @@ const activityRoutes = require("./routes/activityRoutes");
 const setupSocket = require("./socket/setupSocket"); 
 const adminRoutes = require("./routes/adminRoutes");
 const { scheduleInactiveUserCleanup } = require("./jobs/inactiveUserCleanup");
-
+const { scheduleAutoUnban } = require("./jobs/autoUnban");
 
 const app = express();
 const server = http.createServer(app);
@@ -66,9 +66,9 @@ app.use("/api/activities", activityRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/admin", adminRoutes);
 
-if (process.env.NODE_ENV !== "test") {
-  scheduleInactiveUserCleanup();
-}
+scheduleAutoUnban();
+scheduleInactiveUserCleanup();
+
 
 // Kích hoạt Swagger API Docs
 swaggerDocs(app);
