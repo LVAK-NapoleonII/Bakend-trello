@@ -313,7 +313,7 @@ module.exports = () => {
     authMiddleware,
     activityMiddleware("board_updated", "Board", (req) => `User ${req.user.fullName} updated board "${req.body.title || 'unknown'}"`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật board "${req.body.title || 'unknown'}"`,
+      (req) => `${req.user.fullName} đã cập nhật bảng "${req.body.title || 'unknown'}"`,
       "activity",
       "Board"
     ),

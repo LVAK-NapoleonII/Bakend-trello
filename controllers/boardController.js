@@ -168,7 +168,7 @@ const updateBoard = async (req, res) => {
     }
 
     const isMember = board.members.some(m => m.user.toString() === userId.toString() && m.isActive);
-    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật board này!" });
+    if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật bảng này!" });
 
     // Cập nhật các field
     if (title !== undefined) board.title = title;

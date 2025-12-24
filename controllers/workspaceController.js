@@ -176,7 +176,7 @@ const deleteWorkspace = async (req, res) => {
       action: { category: "workspace", type: "deleted" },
       target: workspace._id,
       targetModel: "Workspace",
-      details: `User ${req.user.fullName} deleted workspace "${workspace.name}"`,
+      details: `User ${req.user.fullName} Xóa không gian làm việc "${workspace.name}"`,
     });
     await activity.save();
     workspace.activities.push(activity._id);
@@ -187,7 +187,7 @@ const deleteWorkspace = async (req, res) => {
       workspace.members.forEach((memberId) =>
         io.to(memberId.toString()).emit("workspace-hidden", {
           workspaceId: id,
-          message: `Workspace "${workspace.name}" đã bị ẩn bởi ${req.user.fullName}`,
+          message: `Không gian làm việc "${workspace.name}" đã bị ẩn bởi ${req.user.fullName}`,
         })
       );
     }
@@ -241,11 +241,11 @@ const restoreWorkspace = async (req, res) => {
     }
     if (workspace.owner.toString() !== userId.toString()) {
       console.log("User is not owner:", { userId, owner: workspace.owner });
-      return res.status(403).json({ message: "Chỉ owner mới có quyền khôi phục workspace!" });
+      return res.status(403).json({ message: "Chỉ owner mới có quyền khôi phục không gian làm việc!" });
     }
     if (!workspace.isDeleted) {
       console.log("Workspace is not deleted:", id);
-      return res.status(400).json({ message: "Workspace này chưa bị xóa!" });
+      return res.status(400).json({ message: "Không gian làm việc này chưa bị xóa!" });
     }
 
     console.log("Setting workspace isDeleted to false");
@@ -295,10 +295,10 @@ const restoreWorkspace = async (req, res) => {
       console.warn("Socket.IO not initialized");
     }
 
-    res.status(200).json({ message: "Đã khôi phục workspace", workspace });
+    res.status(200).json({ message: "Đã khôi phục Không gian làm việc", workspace });
   } catch (error) {
     console.error("restoreWorkspace error:", error.message, error.stack);
-    res.status(500).json({ message: "Lỗi khôi phục workspace", error: error.message });
+    res.status(500).json({ message: "Lỗi khôi phục không gian làm việc", error: error.message });
   }
 };
 const leaveWorkspace = async (req, res) => {
@@ -309,13 +309,13 @@ const leaveWorkspace = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
 
     const workspace = await Workspace.findById(id);
-    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy không gian làm việc!" });
     if (workspace.owner.toString() === userId.toString()) {
-      return res.status(403).json({ message: "Owner không thể rời workspace!" });
+      return res.status(403).json({ message: "Owner không thể rời không gian làm việc!" });
     }
 
     const isMember = workspace.members.includes(userId);
-    if (!isMember) return res.status(403).json({ message: "Bạn không phải thành viên của workspace này!" });
+    if (!isMember) return res.status(403).json({ message: "Bạn không phải thành viên của không gian làm việc này!" });
 
     workspace.members = workspace.members.filter((member) => member.toString() !== userId.toString());
 
@@ -324,7 +324,7 @@ const leaveWorkspace = async (req, res) => {
       action: { category: "workspace", type: "left" },
       target: workspace._id,
       targetModel: "Workspace",
-      details: `User ${req.user.fullName} left workspace "${workspace.name}"`,
+      details: `User ${req.user.fullName} rời không gian làm việc "${workspace.name}"`,
     });
     await activity.save();
     workspace.activities.push(activity._id);
@@ -354,7 +354,7 @@ const leaveWorkspace = async (req, res) => {
       });
     }
 
-    res.status(200).json({ message: "Đã rời workspace thành công" });
+    res.status(200).json({ message: "Đã rời không gian làm việc thành công" });
   } catch (error) {
     console.error("leaveWorkspace error:", error.message);
     res.status(500).json({ message: "Lỗi rời workspace" });
@@ -391,15 +391,15 @@ const joinWorkspace = async (req, res) => {
     const { id } = req.params;
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
-    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "Workspace ID không hợp lệ!" });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: "không gian làm việc ID không hợp lệ!" });
 
     const workspace = await Workspace.findById(id);
-    if (!workspace) return res.status(404).json({ message: "Không tìm thấy workspace!" });
-    if (!workspace.isPublic) return res.status(403).json({ message: "Workspace này không phải công khai!" });
-    if (workspace.isDeleted) return res.status(404).json({ message: "Workspace đã bị xóa!" });
+    if (!workspace) return res.status(404).json({ message: "Không tìm thấy không gian làm việc!" });
+    if (!workspace.isPublic) return res.status(403).json({ message: "không gian làm việc này không phải công khai!" });
+    if (workspace.isDeleted) return res.status(404).json({ message: "không gian làm việc đã bị xóa!" });
 
     const isMember = workspace.members.includes(userId);
-    if (isMember) return res.status(400).json({ message: "Bạn đã là thành viên của workspace này!" });
+    if (isMember) return res.status(400).json({ message: "Bạn đã là thành viên của không gian làm việc này!" });
 
     workspace.members.push(userId);
     const activity = new Activity({
@@ -431,9 +431,9 @@ const joinWorkspace = async (req, res) => {
       });
     }
 
-    res.status(200).json({ message: "Đã tham gia workspace thành công", workspace });
+    res.status(200).json({ message: "Đã tham gia không gian làm việc thành công", workspace });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi tham gia workspace", error: error.message });
+    res.status(500).json({ message: "Lỗi tham gia không gian làm việc", error: error.message });
   }
 };
 

@@ -183,7 +183,7 @@ const getCardById = async (req, res) => {
 const updateCard = async (req, res) => {
   try {
     const cardId = req.params.id;
-    const { title, description, dueDate, cover, version} = req.body;
+    const { title, description, dueDate, cover, version } = req.body;
     const userId = req.user?._id;
 
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
@@ -192,12 +192,22 @@ const updateCard = async (req, res) => {
       return res.status(400).json({ message: "Version is required for update" });
     }
 
-    const card = await Card.findOne({ _id: cardId, isDeleted: false, version });
-    if (!card) {
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) return res.status(404).json({ message: "Không tìm thấy thẻ!" });
+
+    const versionDiff = card.version - version;
+    if (versionDiff > 2) {
+      // Conflict nghiêm trọng - từ chối
       return res.status(409).json({ 
-        message: "Xung đột dữ liệu!! thẻ đang được di chuyển bởi thành viên khác",
-        code: "VERSION_CONFLICT"
+        message: "Xung đột dữ liệu!! thẻ đang được chỉnh sửa bởi nhiều người",
+        code: "VERSION_CONFLICT",
+        currentVersion: card.version
       });
+    }
+    
+    // Nếu chỉ lệch 1-2 version → cảnh báo nhưng vẫn cho phép
+    if (versionDiff > 0 && versionDiff <= 2) {
+      console.warn(`Version mismatch detected: expected ${version}, got ${card.version}`);
     }
 
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
@@ -249,7 +259,7 @@ const updateCard = async (req, res) => {
     if (changes.length === 0) {
       const populatedCard = await Card.findById(cardId)
         .populate("members", "email fullName avatar")
-         .populate({
+        .populate({
           path: "comments",
           match: { isDeleted: false },
           populate: { path: "user", select: "email fullName avatar" }
@@ -260,9 +270,15 @@ const updateCard = async (req, res) => {
           populate: { path: "createdBy", select: "email fullName avatar" }
         })
         .populate({ path: "activities", match: { isDeleted: false } });
-      return res.status(200).json(populatedCard);
+      
+      return res.status(200).json({
+        ...populatedCard.toObject(),
+        version: card.version  
+      });
     }
-    card.version += 1;
+
+    card.version += 1; 
+    
     const activity = new Activity({
       user: userId,
       action: { category: "card", type: "updated" },
@@ -274,38 +290,35 @@ const updateCard = async (req, res) => {
     card.activities.push(activity._id);
     await card.save();
 
-    const notifications = board.members.map((m) => ({
-      user: m.user,
-      message: `${req.user.fullName} đã cập nhật ${changes.join(", ")} của thẻ "${oldTitle}"`,
-      type: "activity",
-      target: card._id,
-      targetModel: "Card",
-    }));
-    await Notification.insertMany(notifications);
-
     const populatedCard = await Card.findById(cardId)
       .populate("members", "email fullName avatar")
-       .populate({
-          path: "comments",
-          match: { isDeleted: false },
-          populate: { path: "user", select: "email fullName avatar" }
-        })
-        .populate({
-          path: "notes",
-          match: { isDeleted: false },
-          populate: { path: "createdBy", select: "email fullName avatar" }
-        })
+      .populate({
+        path: "comments",
+        match: { isDeleted: false },
+        populate: { path: "user", select: "email fullName avatar" }
+      })
+      .populate({
+        path: "notes",
+        match: { isDeleted: false },
+        populate: { path: "createdBy", select: "email fullName avatar" }
+      })
       .populate({ path: "activities", match: { isDeleted: false } });
 
     const io = req.app.get("io");
     if (io) {
       io.to(card.board.toString()).emit("card-updated", {
-        card: populatedCard,
+        card: {
+          ...populatedCard.toObject(),
+          version: card.version  
+        },
         message: `${req.user.fullName} đã cập nhật ${changes.join(", ")} của thẻ "${oldTitle}"`,
       });
     }
 
-    return res.status(200).json(populatedCard);
+    return res.status(200).json({
+      ...populatedCard.toObject(),
+      version: card.version 
+    });
   } catch (error) {
     console.error("updateCard error:", error.message);
     return res.status(500).json({ message: "Lỗi khi cập nhật thẻ" });
@@ -389,7 +402,7 @@ const toggleCardCompletion = async (req, res) => {
     if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật thẻ!" });
 
     card.completed = !card.completed;
-
+    card.version += 1;
     const activity = new Activity({
       user: userId,
       action: { category: "card", type: card.completed ? "completed" : "uncompleted" },
@@ -415,13 +428,14 @@ const toggleCardCompletion = async (req, res) => {
       io.to(card.board.toString()).emit("card-completion-toggled", {
         cardId,
         completed: card.completed,
+        version: card.version,
         message: `${req.user.fullName} đã ${card.completed ? "hoàn thành" : "bỏ hoàn thành"} card "${card.title}"`,
       });
     }
 
     return res.status(200).json({
       message: "Cập nhật trạng thái thành công",
-      card: { _id: card._id, title: card.title, completed: card.completed },
+      card: { _id: card._id, title: card.title, completed: card.completed,version: card.version },
     });
   } catch (error) {
     console.error("toggleCardCompletion error:", error.message);

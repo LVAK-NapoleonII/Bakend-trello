@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Card = require("../models/Card");
@@ -24,12 +25,19 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
         req.body.board ||
         req.body.list;
 
-      if (!targetId) {
+      if (!targetId || typeof targetId !== 'string' || targetId.trim() === '') {
         console.warn("notificationMiddleware: Không có targetId hợp lệ", {
           params: req.params,
           body: req.body,
         });
         return next();
+      }
+
+      targetId = targetId.trim();
+
+      if (!mongoose.Types.ObjectId.isValid(targetId)) {
+        console.warn("notificationMiddleware: targetId không phải ObjectId hợp lệ", { targetId });
+        return next(); // Bỏ qua notification nhưng vẫn tiếp tục xử lý request
       }
 
       let Model;
@@ -144,7 +152,7 @@ const notificationMiddleware = (messageFn, type, targetModel) => {
       next();
     } catch (error) {
       console.error("notificationMiddleware error:", error);
-      next();
+      next(); 
     }
   };
 };

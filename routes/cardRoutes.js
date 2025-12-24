@@ -97,7 +97,7 @@ module.exports = (io) => {
     authMiddleware,
     activityMiddleware("card_created", "member", "Card", (req) => `User ${req.user.fullName} created card "${req.body.title}"`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã tạo card "${req.body.title}"`,
+      (req) => `${req.user.fullName} đã tạo thẻ "${req.body.title}"`,
       "activity",
       "Card"
     ),
@@ -234,7 +234,7 @@ module.exports = (io) => {
     authMiddleware,
     activityMiddleware("card_updated", "member", "Card", (req) => `User ${req.user.fullName} updated card "${req.body.title || 'unknown'}"`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật card "${req.body.title || 'unknown'}"`,
+      (req) => `${req.user.fullName} đã cập nhật thẻ "${req.body.title || 'unknown'}"`,
       "activity",
       "Card"
     ),
@@ -416,7 +416,7 @@ module.exports = (io) => {
     authMiddleware,
     activityMiddleware("card_moved", "member", "Card", (req) => `User ${req.user.fullName} moved card`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã di chuyển card`,
+      (req) => `${req.user.fullName} đã di chuyển thẻ`,
       "activity",
       "Card"
     ),
@@ -481,7 +481,7 @@ module.exports = (io) => {
     (req) => `User ${req.user.fullName} added a member to card`
   ),
   notificationMiddleware(
-    (req) => `${req.user.fullName} đã thêm bạn vào card`,
+    (req) => `${req.user.fullName} đã thêm bạn vào thẻ`,
     "activity",
     "Card"
   ),
@@ -548,7 +548,7 @@ router.delete(
     (req) => `User ${req.user.fullName} removed member ${req.params.memberId} from card ${req.params.cardId}`
   ),
   notificationMiddleware(
-    (req) => `${req.user.fullName} đã xóa một thành viên khỏi card`,
+    (req) => `${req.user.fullName} đã xóa một thành viên khỏi thẻ`,
     "activity",
     "Card"
   ),
@@ -609,7 +609,7 @@ router.delete(
     authMiddleware,
     activityMiddleware("comment_added", "member", "Card", (req) => `User ${req.user.fullName} added a comment to card`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã bình luận trên card`,
+      (req) => `${req.user.fullName} đã bình luận trên thẻ`,
       "activity",
       "Card"
     ),
@@ -717,7 +717,7 @@ router.delete(
     authMiddleware,
     activityMiddleware("note_added", "member", "Card", (req) => `User ${req.user.fullName} added a note to card`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã thêm ghi chú vào card`,
+      (req) => `${req.user.fullName} đã thêm ghi chú vào thẻ`,
       "activity",
       "Card"
     ),
@@ -825,7 +825,7 @@ router.delete(
     authMiddleware,
     activityMiddleware("checklist_added", "member", "Card", (req) => `User ${req.user.fullName} added a checklist to card`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã thêm checklist vào card`,
+      (req) => `${req.user.fullName} đã thêm danh sách công việc vào thẻ`,
       "activity",
       "Card"
     ),
@@ -895,7 +895,7 @@ router.delete(
       (req) => `User ${req.user.fullName} updated checklist "${req.body.title}"`
     ),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật checklist "${req.body.title}"`,
+      (req) => `${req.user.fullName} đã cập nhật danh sách công việc "${req.body.title}"`,
       "activity",
       "Card"
     ),
@@ -953,7 +953,7 @@ router.delete(
       (req) => `User ${req.user.fullName} deleted a checklist`
     ),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã xóa một checklist`,
+      (req) => `${req.user.fullName} đã xóa một danh sách công việc`,
       "activity",
       "Card"
     ),
@@ -1020,7 +1020,7 @@ router.delete(
     authMiddleware,
     activityMiddleware("checklist_item_added", "member", "Card", (req) => `User ${req.user.fullName} added a checklist item`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã thêm item vào checklist của card`,
+      (req) => `${req.user.fullName} đã thêm công việc vào danh sách công việc của thẻ`,
       "activity",
       "Card"
     ),
@@ -1096,7 +1096,7 @@ router.delete(
       (req) => `User ${req.user.fullName} updated a checklist item to "${req.body.text}"`
     ),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật item "${req.body.text}" trong checklist`,
+      (req) => `${req.user.fullName} đã cập nhật công việc "${req.body.text}" trong danh sách công việc`,
       "activity",
       "Card"
     ),
@@ -1160,7 +1160,7 @@ router.delete(
       (req) => `User ${req.user.fullName} deleted a checklist item`
     ),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã xóa một item trong checklist`,
+      (req) => `${req.user.fullName} đã xóa một công việc trong danh sách công việc`,
       "activity",
       "Card"
     ),
@@ -1219,7 +1219,7 @@ router.delete(
     authMiddleware,
     activityMiddleware("checklist_item_toggled", "member", "Card", (req) => `User ${req.user.fullName} toggled a checklist item`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã cập nhật trạng thái checklist item trong card`,
+      (req) => `${req.user.fullName} đã cập nhật trạng thái công việc trong thẻ`,
       "activity",
       "Card"
     ),
