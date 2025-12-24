@@ -188,34 +188,47 @@ const updateCard = async (req, res) => {
 
     if (!userId) return res.status(401).json({ message: "Không tìm thấy thông tin user!" });
     if (!mongoose.Types.ObjectId.isValid(cardId)) return res.status(400).json({ message: "Card ID không hợp lệ!" });
-    if (version === undefined) {
-      return res.status(400).json({ message: "Version is required for update" });
-    }
+    
 
-    const card = await Card.findOne({ _id: cardId, isDeleted: false });
-    if (!card) return res.status(404).json({ message: "Không tìm thấy thẻ!" });
-
-    const versionDiff = card.version - version;
-    if (versionDiff > 2) {
-      // Conflict nghiêm trọng - từ chối
-      return res.status(409).json({ 
-        message: "Xung đột dữ liệu!! thẻ đang được chỉnh sửa bởi nhiều người",
-        code: "VERSION_CONFLICT",
-        currentVersion: card.version
+    if (version === undefined || version === null) {
+      return res.status(400).json({ 
+        message: "Version is required for update",
+        code: "MISSING_VERSION"
       });
     }
-    
-    // Nếu chỉ lệch 1-2 version → cảnh báo nhưng vẫn cho phép
-    if (versionDiff > 0 && versionDiff <= 2) {
-      console.warn(`Version mismatch detected: expected ${version}, got ${card.version}`);
+
+
+    const card = await Card.findOne({ 
+      _id: cardId, 
+      isDeleted: false,
+      version: version  // ⚠️ QUAN TRỌNG: Phải match version
+    });
+
+    if (!card) {
+      // Kiểm tra xem card có tồn tại không
+      const existingCard = await Card.findOne({ _id: cardId, isDeleted: false });
+      
+      if (!existingCard) {
+        return res.status(404).json({ message: "Không tìm thấy thẻ!" });
+      }
+      
+      // Card tồn tại nhưng version không khớp -> Conflict
+      return res.status(409).json({ 
+        message: "Thẻ đã được chỉnh sửa bởi người khác. Vui lòng tải lại!",
+        code: "VERSION_CONFLICT",
+        currentVersion: existingCard.version,
+        card: existingCard  // Trả về card mới nhất để client cập nhật
+      });
     }
 
+    // Kiểm tra quyền
     const board = await Board.findOne({ _id: card.board, isDeleted: false });
     if (!board) return res.status(404).json({ message: "Board không tồn tại!" });
 
     const isMember = board.members.some((m) => m.user?.toString() === userId.toString() && m.isActive);
     if (!isMember) return res.status(403).json({ message: "Bạn không có quyền cập nhật thẻ!" });
 
+    // Thu thập các thay đổi
     const changes = [];
     const oldTitle = card.title;
 
@@ -256,6 +269,7 @@ const updateCard = async (req, res) => {
       }
     }
 
+    // Nếu không có thay đổi, trả về card hiện tại
     if (changes.length === 0) {
       const populatedCard = await Card.findById(cardId)
         .populate("members", "email fullName avatar")
@@ -279,6 +293,7 @@ const updateCard = async (req, res) => {
 
     card.version += 1; 
     
+    // Tạo activity
     const activity = new Activity({
       user: userId,
       action: { category: "card", type: "updated" },
@@ -288,6 +303,8 @@ const updateCard = async (req, res) => {
     });
     await activity.save();
     card.activities.push(activity._id);
+    
+
     await card.save();
 
     const populatedCard = await Card.findById(cardId)
@@ -304,6 +321,7 @@ const updateCard = async (req, res) => {
       })
       .populate({ path: "activities", match: { isDeleted: false } });
 
+    // Emit socket
     const io = req.app.get("io");
     if (io) {
       io.to(card.board.toString()).emit("card-updated", {
@@ -322,6 +340,117 @@ const updateCard = async (req, res) => {
   } catch (error) {
     console.error("updateCard error:", error.message);
     return res.status(500).json({ message: "Lỗi khi cập nhật thẻ" });
+  }
+};
+
+// ===== EditCardDialog.jsx =====
+// Đảm bảo gửi version và xử lý conflict
+
+const handleUpdateCard = async () => {
+  if (!title.trim()) {
+    toast.error("Tiêu đề không được để trống!");
+    return;
+  }
+
+  if (cover && coverType === "color" && !isValidHexColor(cover)) {
+    toast.error("Màu không hợp lệ!");
+    return;
+  }
+
+  if (cover && coverType === "image" && !isValidImageUrl(cover)) {
+    toast.error("URL ảnh không hợp lệ!");
+    return;
+  }
+
+  try {
+    setLoading(true);
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("Không tìm thấy token!");
+
+    const updateData = {
+      title: title.trim(),
+      description: description.trim() || null,
+      cover: cover ? cover.trim() : null,
+      version: card.version,  
+    };
+
+    if (isBoardOwner) {
+      updateData.dueDate = dueDate || null;
+    }
+
+    console.log("Sending update with version:", card.version);
+
+    const response = await axios.put(
+      `http://localhost:5000/api/cards/${card._id}`,
+      updateData,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    const updatedCard = response.data;
+    console.log("Update successful, new version:", updatedCard.version);
+
+    setColumns((prevColumns) =>
+      prevColumns.map((col) => ({
+        ...col,
+        cards: col.cards.map((c) =>
+          c._id === card._id
+            ? {
+                ...c,
+                title: updatedCard.title,
+                description: updatedCard.description,
+                dueDate: updatedCard.dueDate,
+                cover: updatedCard.cover,
+                version: updatedCard.version,  
+                members: c.members,
+                checklists: c.checklists,
+                completed: c.completed,
+              }
+            : c
+        ),
+      }))
+    );
+
+    if (socket && socketReady) {
+      socket.emit("card-updated", { cardId: card._id, card: updatedCard });
+    }
+
+    toast.success("Cập nhật thẻ thành công!");
+    onClose();
+  } catch (err) {
+    console.error("Error updating card:", err);
+    const errorData = err.response?.data;
+
+    if (err.response?.status === 409 && errorData?.code === "VERSION_CONFLICT") {
+      toast.error(
+        "Thẻ đã được chỉnh sửa bởi người khác. Đang tải lại dữ liệu...",
+        { autoClose: 3000 }
+      );
+
+      // Cập nhật card với dữ liệu mới nhất từ server
+      if (errorData.card) {
+        setColumns((prevColumns) =>
+          prevColumns.map((col) => ({
+            ...col,
+            cards: col.cards.map((c) =>
+              c._id === card._id ? { ...c, ...errorData.card } : c
+            ),
+          }))
+        );
+      }
+
+      // Đóng dialog để user mở lại và thấy dữ liệu mới
+      onClose();
+      return;
+    }
+
+    if (err.response?.status === 403) {
+      toast.error("Bạn không có quyền chỉnh sửa hạn chót!");
+    } else {
+      const msg = errorData?.message || err.message;
+      toast.error(`Lỗi: ${msg}`);
+    }
+  } finally {
+    setLoading(false);
   }
 };
 
@@ -408,7 +537,7 @@ const toggleCardCompletion = async (req, res) => {
       action: { category: "card", type: card.completed ? "completed" : "uncompleted" },
       target: card._id,
       targetModel: "Card",
-      details: `User ${req.user.fullName} ${card.completed ? "completed" : "uncompleted"} card "${card.title}"`,
+      details: `User ${req.user.fullName} ${card.completed ? "Hoàn thành" : "bỏ hoàn thành"} card "${card.title}"`,
     });
     await activity.save();
     card.activities.push(activity._id);

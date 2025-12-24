@@ -26,7 +26,7 @@ const createWorkspace = async (req, res) => {
       action: { category: "workspace", type: "created" },
       target: workspace._id,
       targetModel: "Workspace",
-      details: `User ${req.user.fullName} created workspace "${name}"`,
+      details: `User ${req.user.fullName} tạo không gian làm việc "${name}"`,
     });
     await activity.save();
     workspace.activities.push(activity._id);
@@ -120,7 +120,7 @@ const updateWorkspace = async (req, res) => {
       action: { category: "workspace", type: "updated" },
       target: workspace._id,
       targetModel: "Workspace",
-      details: `User ${req.user.fullName} updated workspace "${workspace.name}"`,
+      details: `User ${req.user.fullName} cập nhật không gian làm việc "${workspace.name}"`,
     });
     await activity.save();
     workspace.activities.push(activity._id);
@@ -255,7 +255,7 @@ const restoreWorkspace = async (req, res) => {
       action: { category: "workspace", type: "restored" },
       target: workspace._id,
       targetModel: "Workspace",
-      details: `User ${req.user.fullName} restored workspace "${workspace.name}"`,
+      details: `User ${req.user.fullName} khôi phục không gian làm việc "${workspace.name}"`,
     });
     await activity.save();
     workspace.activities.push(activity._id);

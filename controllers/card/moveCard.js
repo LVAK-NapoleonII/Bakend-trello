@@ -10,22 +10,21 @@ const moveCard = async (req, res) => {
     const { newListId, newBoardId, newPosition, version } = req.body;
     const userId = req.user?._id;
 
-    // Validate
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    if (!mongoose.Types.ObjectId.isValid(cardId) || !mongoose.Types.ObjectId.isValid(newListId) || !mongoose.Types.ObjectId.isValid(newBoardId)) {
+    if (!mongoose.Types.ObjectId.isValid(cardId) || !mongoose.Types.ObjectId.isValid(newListId)) {
       return res.status(400).json({ message: "ID không hợp lệ!" });
     }
-    if (version === undefined) {
-      return res.status(400).json({ message: "Phiên bản (version) là bắt buộc!" });
+
+    // === BỎ KIỂM TRA VERSION NGHIÊM NGẶT ===
+    // Thay vì reject ngay, chỉ log warning
+    const card = await Card.findOne({ _id: cardId, isDeleted: false });
+    if (!card) {
+      return res.status(404).json({ message: "Không tìm thấy thẻ!" });
     }
 
-    // Bước 1: Kiểm tra version (Optimistic Locking)
-    const card = await Card.findOne({ _id: cardId, isDeleted: false, version });
-    if (!card) {
-      return res.status(409).json({
-        message: "Thẻ đã bị thay đổi bởi người khác. Đang tải lại dữ liệu...",
-        code: "VERSION_CONFLICT"
-      });
+    // Kiểm tra version nhưng vẫn cho phép di chuyển
+    if (version !== undefined && card.version !== version) {
+      console.warn(`Version mismatch: expected ${version}, got ${card.version}. Proceeding anyway...`);
     }
 
     const newList = await List.findById(newListId);
@@ -33,27 +32,23 @@ const moveCard = async (req, res) => {
     if (!newList || !newBoard || newList.isDeleted || newBoard.isDeleted) {
       return res.status(404).json({ message: "List hoặc Board không tồn tại!" });
     }
-    if (newList.board.toString() !== newBoardId) {
-      return res.status(400).json({ message: "List không thuộc board này!" });
-    }
 
     const isMember = newBoard.members.some(m => m.user?.toString() === userId.toString() && m.isActive);
     if (!isMember) return res.status(403).json({ message: "Không có quyền!" });
 
     const oldList = card.list.toString() !== newListId ? await List.findById(card.list) : newList;
     const isSameList = card.list.toString() === newListId;
-
     const position = newPosition ?? card.position;
 
-    // Bắt đầu xử lý di chuyển (không dùng transaction)
+    // === XỬ LÝ DI CHUYỂN ===
     if (isSameList) {
-      // Chỉ thay đổi vị trí trong cùng list
       await List.findByIdAndUpdate(oldList._id, {
         $pull: { cardOrderIds: cardId },
+      });
+      await List.findByIdAndUpdate(oldList._id, {
         $push: { cardOrderIds: { $each: [cardId], $position: position } }
       });
     } else {
-      // Di chuyển sang list khác
       if (oldList) {
         await List.findByIdAndUpdate(oldList._id, { $pull: { cardOrderIds: cardId } });
       }
@@ -61,19 +56,16 @@ const moveCard = async (req, res) => {
         $push: { cardOrderIds: { $each: [cardId], $position: position } }
       });
 
-      // Cập nhật card (list, board, position, version++)
-      await Card.findOneAndUpdate(
-        { _id: cardId, version },
-        {
-          list: newListId,
-          board: newBoardId,
-          position,
-          $inc: { version: 1 }
-        }
-      );
+      // Cập nhật card (KHÔNG kiểm tra version)
+      await Card.findByIdAndUpdate(cardId, {
+        list: newListId,
+        board: newBoardId,
+        position,
+        $inc: { version: 1 }
+      });
     }
 
-    // Re-index lại position cho các list bị ảnh hưởng
+    // Re-index positions
     const listsToReindex = isSameList ? [oldList] : [oldList, newList].filter(Boolean);
     for (const list of listsToReindex) {
       const updatedList = await List.findById(list._id);
@@ -112,22 +104,12 @@ const moveCard = async (req, res) => {
         newListId,
         newPosition: position,
       });
-
-      // Cập nhật thứ tự cả 2 list
-      for (const list of listsToReindex) {
-        const freshList = await List.findById(list._id);
-        const cards = await Card.find({ list: list._id, isDeleted: false }).sort("position");
-        io.to(newBoardId).emit("card-order-updated", {
-          listId: list._id,
-          cardOrder: cards.map(c => c._id),
-        });
-      }
     }
 
     return res.json({
       message: "Di chuyển thành công",
       card: updatedCard,
-      version: card.version + 1
+      version: updatedCard.version // Trả về version mới nhất
     });
 
   } catch (error) {

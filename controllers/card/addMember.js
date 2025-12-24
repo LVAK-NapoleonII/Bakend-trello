@@ -51,34 +51,86 @@ const addMember = async (req, res) => {
       return res.status(400).json({ message: "Member đã có trong thẻ!" });
     }
 
-    // CHUYỂN memberId → ObjectId
+
     card.members.push(new mongoose.Types.ObjectId(memberId));
+    
+    // Tăng version để tránh conflict
+    card.version = (card.version || 0) + 1;
+    
     await card.save();
 
-    // GHI HOẠT ĐỘNG
-    if (req.activityData) {
-      const activity = new Activity({
-        ...req.activityData,
-        target: cardId,
-        board: card.board,
-      });
-      await activity.save();
+    const memberUser = await User.findById(memberId).select("_id fullName email avatar isOnline");
+    
+    if (!memberUser) {
+      return res.status(404).json({ message: "Không tìm thấy user!" });
     }
+
+    // GHI HOẠT ĐỘNG
+    const activity = new Activity({
+      user: userId,
+      action: { category: "member", type: "added" },
+      target: cardId,
+      targetModel: "Card",
+      details: `${req.user.fullName} đã thêm ${memberUser.fullName} vào thẻ "${card.title}"`,
+    });
+    await activity.save();
+
+    card.activities.push(activity._id);
+    board.activities.push(activity._id);
+    await Promise.all([board.save()]);
+
+
+    const populatedCard = await Card.findById(cardId)
+      .populate("members", "_id fullName email avatar isOnline")
+      .populate({
+        path: "comments",
+        match: { isDeleted: false },
+        populate: { path: "user", select: "_id fullName email avatar isOnline" }
+      })
+      .populate({
+        path: "notes",
+        match: { isDeleted: false },
+        populate: { path: "createdBy", select: "_id fullName email avatar isOnline" }
+      })
+      .populate({ path: "activities", match: { isDeleted: false } })
+      .lean();
 
     // GỬI SOCKET REALTIME
-    if (req.io && req.connectedUsers) {
-      req.io.to(card.board.toString()).emit("member-added", {
+    const io = req.app.get("io");
+    if (io) {
+      io.to(card.board.toString()).emit("member-added", {
         cardId,
         member: {
-          _id: memberId,
-          fullName: "Tên user", // LẤY TỪ DB NẾU CẦN
+          _id: memberUser._id,
+          fullName: memberUser.fullName,
+          email: memberUser.email,
+          avatar: memberUser.avatar,
+          isOnline: memberUser.isOnline,
           isActive: true,
         },
-        clientId: req.socketId,
+        message: `${req.user.fullName} đã thêm ${memberUser.fullName} vào thẻ`,
       });
+
+      // Gửi notification cho member được thêm
+      const notification = new Notification({
+        user: memberId,
+        message: `Bạn đã được thêm vào thẻ "${card.title}" bởi ${req.user.fullName}`,
+        type: "activity",
+        target: cardId,
+        targetModel: "Card",
+        isRead: false,
+        isHidden: false,
+      });
+      await notification.save();
+      io.to(memberId.toString()).emit("new-notification", notification);
     }
 
-    res.status(200).json({ message: "Thêm thành viên thành công!", card });
+
+    res.status(200).json({ 
+      message: "Thêm thành viên thành công!", 
+      card: populatedCard,
+      version: card.version
+    });
   } catch (error) {
     console.error("addMember error:", error);
     res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -86,3 +138,4 @@ const addMember = async (req, res) => {
 };
 
 module.exports = addMember;
+

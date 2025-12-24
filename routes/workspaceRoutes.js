@@ -93,9 +93,9 @@ module.exports = (io) => {
   router.post(
     "/",
     authMiddleware,
-    activityMiddleware("workspace_created", "Workspace", (req) => `User ${req.user.fullName} created workspace "${req.body.name}"`),
+    activityMiddleware("workspace_created", "Workspace", (req) => `User ${req.user.fullName} tạo không gian làm việc "${req.body.name}"`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã tạo workspace "${req.body.name}"`,
+      (req) => `${req.user.fullName} đã tạo không gian làm việc "${req.body.name}"`,
       "activity",
       "Workspace"
     ),
@@ -382,7 +382,7 @@ module.exports = (io) => {
     "/:id",
     authMiddleware,
     workspaceMiddleware,
-    activityMiddleware("workspace_updated", "Workspace", (req) => `User ${req.user.fullName} updated workspace "${req.body.name || 'unknown'}"`),
+    activityMiddleware("workspace_updated", "Workspace", (req) => `User ${req.user.fullName} cập nhật không gian làm việc "${req.body.name || 'unknown'}"`),
     notificationMiddleware(
       (req) => `${req.user.fullName} đã cập nhật workspace "${req.body.name || 'unknown'}"`,
       "activity",
@@ -505,9 +505,9 @@ module.exports = (io) => {
     "/:id/restore",
     authMiddleware,
     workspaceMiddleware,
-    activityMiddleware("workspace_restored", "Workspace", (req) => `User ${req.user.fullName} restored workspace`),
+    activityMiddleware("workspace_restored", "Workspace", (req) => `User ${req.user.fullName} khôi phục không gian làm việc`),
     notificationMiddleware(
-      (req) => `${req.user.fullName} đã khôi phục workspace`,
+      (req) => `${req.user.fullName} đã khôi phục không gian làm việc`,
       "activity",
       "Workspace"
     ),

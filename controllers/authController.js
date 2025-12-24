@@ -137,7 +137,16 @@ const getProfile = async (req, res) => {
     const user = await User.findById(req.user._id)
     if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
 
-    res.status(200).json({ user });
+    res.status(200).json({ user: {
+        _id: user._id, 
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        avatar: user.avatar,
+        isOnline: user.isOnline,
+        isVerified: user.isVerified,
+        isAdmin: user.isAdmin,
+        isBanned: user.isBanned, }  });
   } catch (error) {
     console.error("Get profile error:", error.message);
     res.status(500).json({ message: "Lỗi server" });

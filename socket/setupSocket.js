@@ -54,7 +54,7 @@ module.exports = (io) => {
 
     socket.on("join-workspace", (workspaceId) => {
       socket.join(workspaceId);
-      console.log(`[Socket] User ${userId} joined workspace ${workspaceId}`);
+      console.log(`[Socket] User ${userId} Tham gia không gian làm việc ${workspaceId}`);
     });
 
     socket.on("user-login", (requestedUserId) => {

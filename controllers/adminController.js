@@ -569,7 +569,7 @@ const deleteWorkspace = async (req, res) => {
         action: { category: "workspace", type: "permanently_deleted_by_admin" },
         target: workspaceId,
         targetModel: "Workspace",
-        details: `Admin ${req.user.fullName} permanently deleted workspace "${workspace.name}"`
+        details: `Admin ${req.user.fullName} Xóa vĩnh viễn không gian làm việc "${workspace.name}"`
       });
       await activity.save();
 
@@ -583,7 +583,7 @@ const deleteWorkspace = async (req, res) => {
         action: { category: "workspace", type: "deleted_by_admin" },
         target: workspaceId,
         targetModel: "Workspace",
-        details: `Admin ${req.user.fullName} deleted workspace "${workspace.name}"`
+        details: `Admin ${req.user.fullName} xóa không gian làm việc "${workspace.name}"`
       });
       await activity.save();
 
@@ -631,7 +631,7 @@ const restoreWorkspace = async (req, res) => {
       action: { category: "workspace", type: "restored_by_admin" },
       target: workspaceId,
       targetModel: "Workspace",
-      details: `Admin ${req.user.fullName} restored workspace "${workspace.name}"`
+      details: `Admin ${req.user.fullName} khôi phục không gian làm việc "${workspace.name}"`
     });
     await activity.save();
 

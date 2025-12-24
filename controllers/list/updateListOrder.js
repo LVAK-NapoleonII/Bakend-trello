@@ -55,7 +55,7 @@ const updateListOrder = async (req, res) => {
       action: { category: "board", type: "list_order_updated" },
       target: board._id,
       targetModel: "Board",
-      details: `User ${req.user.fullName} updated list order in board "${board.title}"`,
+      details: `User ${req.user.fullName} cập nhật danh sách trong bảng "${board.title}"`,
     });
     await activity.save();
     board.activities = board.activities || [];
